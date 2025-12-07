@@ -91,7 +91,16 @@ class BookingCreateTimeRange(BaseModel):
     start_minute: int = Field(..., ge=0, le=55)
     end_hour: int = Field(..., ge=0, le=23)
     end_minute: int = Field(..., ge=0, le=55)
-
+    
+    @classmethod
+    def model_validate(cls, value):
+        # Валидация, что минуты кратны 5
+        if isinstance(value, dict):
+            if value.get('start_minute') is not None and value['start_minute'] % 5 != 0:
+                raise ValueError('start_minute must be a multiple of 5')
+            if value.get('end_minute') is not None and value['end_minute'] % 5 != 0:
+                raise ValueError('end_minute must be a multiple of 5')
+        return super().model_validate(value)
 
 class BookingCancelRequest(BaseModel):
     booking_id: int

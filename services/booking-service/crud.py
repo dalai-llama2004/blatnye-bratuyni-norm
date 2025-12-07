@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload
 
 import models
 import schemas
+from config import settings
 
 
 # ============================================================
@@ -180,12 +181,12 @@ async def create_booking_by_time_range(
         )
     )
     
-    # Проверка: не больше 6 часов
+    # Проверка: не больше MAX_BOOKING_HOURS
     duration = end_time - start_time
     if duration.total_seconds() <= 0:
         return None  # Некорректный интервал
-    if duration.total_seconds() > 6 * 3600:
-        return None  # Больше 6 часов
+    if duration.total_seconds() > settings.MAX_BOOKING_HOURS * 3600:
+        return None  # Больше лимита
     
     # Получить зону
     zone = await session.get(models.Zone, booking_in.zone_id)

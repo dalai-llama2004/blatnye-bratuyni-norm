@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { bookingService } from '@/lib/booking';
 import { authService } from '@/lib/auth';
+import { BOOKING_CONFIG } from '@/lib/constants';
 import { Zone } from '@/types';
 
 export default function ZonesPage() {
@@ -25,7 +26,7 @@ export default function ZonesPage() {
 
   // Генерация массивов для часов и минут
   const hours = Array.from({ length: 24 }, (_, i) => i);
-  const minutes = Array.from({ length: 12 }, (_, i) => i * 5);
+  const minutes = Array.from({ length: 60 / BOOKING_CONFIG.MINUTE_STEP }, (_, i) => i * BOOKING_CONFIG.MINUTE_STEP);
 
   useEffect(() => {
     loadZones();
@@ -59,8 +60,8 @@ export default function ZonesPage() {
     const durationMinutes = endTotalMinutes - startTotalMinutes;
     const durationHours = durationMinutes / 60;
     
-    if (durationHours > 6) {
-      return 'Бронирование не может быть длиннее 6 часов';
+    if (durationHours > BOOKING_CONFIG.MAX_BOOKING_HOURS) {
+      return `Бронирование не может быть длиннее ${BOOKING_CONFIG.MAX_BOOKING_HOURS} часов`;
     }
     
     return null;
@@ -258,8 +259,8 @@ export default function ZonesPage() {
                 </div>
 
                 <div className="text-sm text-gray-600 mt-2">
-                  <p>• Максимальная длительность: 6 часов</p>
-                  <p>• Минуты кратны 5</p>
+                  <p>• Максимальная длительность: {BOOKING_CONFIG.MAX_BOOKING_HOURS} часов</p>
+                  <p>• Минуты кратны {BOOKING_CONFIG.MINUTE_STEP}</p>
                 </div>
               </div>
             )}
