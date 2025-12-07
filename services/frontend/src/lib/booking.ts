@@ -5,6 +5,7 @@ import {
   Slot,
   Booking,
   BookingCreate,
+  BookingCreateByTime,
   BookingCancel,
   ZoneCreate,
   ZoneUpdate,
@@ -35,6 +36,12 @@ export const bookingService = {
   // Создать бронирование
   async createBooking(data: BookingCreate): Promise<Booking> {
     const response = await api.post('/bookings/', data);
+    return response.data;
+  },
+
+  // Создать бронирование по времени
+  async createBookingByTime(data: BookingCreateByTime): Promise<Booking> {
+    const response = await api.post('/bookings/by-time', data);
     return response.data;
   },
 

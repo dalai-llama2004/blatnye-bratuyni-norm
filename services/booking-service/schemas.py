@@ -22,7 +22,7 @@ class ZoneBase(BaseModel):
 
 
 class ZoneCreate(ZoneBase):
-    pass
+    places_count: int = Field(..., ge=1, json_schema_extra={"example": 10})
 
 
 class ZoneUpdate(BaseModel):
@@ -81,6 +81,18 @@ class BookingCreate(BaseModel):
     slot_id: int
 
 
+class BookingCreateTimeRange(BaseModel):
+    """
+    Создание брони по времени для зоны (новый способ)
+    """
+    zone_id: int
+    date: str = Field(..., json_schema_extra={"example": "2025-12-15"})
+    start_hour: int = Field(..., ge=0, le=23)
+    start_minute: int = Field(..., ge=0, le=55)
+    end_hour: int = Field(..., ge=0, le=23)
+    end_minute: int = Field(..., ge=0, le=55)
+
+
 class BookingCancelRequest(BaseModel):
     booking_id: int
 
@@ -106,6 +118,10 @@ class BookingOut(ORMBase):
     id: int
     user_id: int
     slot_id: int
+    zone_name: Optional[str]
+    zone_address: Optional[str]
+    start_time: Optional[datetime]
+    end_time: Optional[datetime]
     status: str
     created_at: datetime
     updated_at: datetime

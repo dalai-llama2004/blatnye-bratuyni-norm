@@ -93,8 +93,15 @@ async def create_booking(
     - грубо проверяем, что у пользователя нет активной брони на этот же слот
     (более сложные проверки конкуренции можно вынести в отдельную ветку).
     """
-    # 1. Найти слот
-    slot = await session.get(models.Slot, booking_in.slot_id)
+    # 1. Найти слот с загруженными связями для получения zone info
+    stmt = (
+        select(models.Slot)
+        .options(joinedload(models.Slot.place).joinedload(models.Place.zone))
+        .where(models.Slot.id == booking_in.slot_id)
+    )
+    result = await session.execute(stmt)
+    slot = result.scalar_one_or_none()
+    
     if slot is None:
         return None  # роутер может превратить это в 404
 
@@ -114,11 +121,16 @@ async def create_booking(
     if existing is not None:
         return None
 
-    # 3. Создать бронь
+    # 3. Создать бронь с денормализованными данными
+    zone = slot.place.zone if slot.place else None
     booking = models.Booking(
         user_id=user_id,
         slot_id=slot.id,
         status="active",
+        zone_name=zone.name if zone else None,
+        zone_address=zone.address if zone else None,
+        start_time=slot.start_time,
+        end_time=slot.end_time,
     )
     session.add(booking)
 
@@ -128,6 +140,129 @@ async def create_booking(
     await session.commit()
     await session.refresh(booking)
     return booking
+
+
+async def create_booking_by_time_range(
+    session: AsyncSession,
+    user_id: int,
+    booking_in: schemas.BookingCreateTimeRange,
+) -> Optional[models.Booking]:
+    """
+    Создание брони по диапазону времени для зоны.
+    
+    Алгоритм:
+    1. Проверить, что интервал не больше 6 часов
+    2. Найти зону и получить её название и адрес
+    3. Найти места в зоне
+    4. Для каждого места проверить, свободно ли оно в заданном диапазоне
+    5. Если есть свободное место, создать слот и бронь
+    """
+    from datetime import datetime, timedelta, date as date_type
+    
+    # Парсим дату и создаем datetime объекты
+    try:
+        target_date = date_type.fromisoformat(booking_in.date)
+    except ValueError:
+        return None
+    
+    start_time = datetime.combine(
+        target_date,
+        datetime.min.time().replace(
+            hour=booking_in.start_hour,
+            minute=booking_in.start_minute
+        )
+    )
+    end_time = datetime.combine(
+        target_date,
+        datetime.min.time().replace(
+            hour=booking_in.end_hour,
+            minute=booking_in.end_minute
+        )
+    )
+    
+    # Проверка: не больше 6 часов
+    duration = end_time - start_time
+    if duration.total_seconds() <= 0:
+        return None  # Некорректный интервал
+    if duration.total_seconds() > 6 * 3600:
+        return None  # Больше 6 часов
+    
+    # Получить зону
+    zone = await session.get(models.Zone, booking_in.zone_id)
+    if zone is None or not zone.is_active:
+        return None
+    
+    # Получить активные места в зоне
+    stmt = (
+        select(models.Place)
+        .where(
+            and_(
+                models.Place.zone_id == zone.id,
+                models.Place.is_active.is_(True),
+            )
+        )
+    )
+    result = await session.execute(stmt)
+    places = list(result.scalars().all())
+    
+    if not places:
+        return None
+    
+    # Ищем свободное место
+    for place in places:
+        # Проверяем, нет ли пересечений с существующими слотами
+        stmt = (
+            select(models.Slot)
+            .where(
+                and_(
+                    models.Slot.place_id == place.id,
+                    # Проверка пересечения интервалов
+                    models.Slot.start_time < end_time,
+                    models.Slot.end_time > start_time,
+                )
+            )
+        )
+        result = await session.execute(stmt)
+        overlapping_slots = list(result.scalars().all())
+        
+        # Если есть пересекающиеся слоты, проверяем их доступность
+        has_conflict = False
+        for slot in overlapping_slots:
+            # Если слот недоступен, значит есть конфликт
+            if not slot.is_available:
+                has_conflict = True
+                break
+        
+        # Если нет конфликтов, это место свободно
+        if not has_conflict:
+            # Создаем слот
+            slot = models.Slot(
+                place_id=place.id,
+                start_time=start_time,
+                end_time=end_time,
+                is_available=False,
+            )
+            session.add(slot)
+            await session.flush()  # Получить slot.id
+            
+            # Создаем бронь
+            booking = models.Booking(
+                user_id=user_id,
+                slot_id=slot.id,
+                status="active",
+                zone_name=zone.name,
+                zone_address=zone.address,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            session.add(booking)
+            
+            await session.commit()
+            await session.refresh(booking)
+            return booking
+    
+    # Нет свободных мест
+    return None
 
 
 async def get_booking_by_id(
@@ -307,6 +442,17 @@ async def create_zone(
         is_active=data.is_active,
     )
     session.add(zone)
+    await session.flush()  # Получить zone.id для создания мест
+    
+    # Автоматически создаём places_count мест
+    for i in range(1, data.places_count + 1):
+        place = models.Place(
+            zone_id=zone.id,
+            name=f"Место {i}",
+            is_active=True,
+        )
+        session.add(place)
+    
     await session.commit()
     await session.refresh(zone)
     return zone

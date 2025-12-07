@@ -20,6 +20,7 @@ export default function AdminPage() {
     name: '',
     address: '',
     is_active: true,
+    places_count: 10,
   });
 
   const [editForm, setEditForm] = useState({
@@ -63,7 +64,7 @@ export default function AdminPage() {
       await adminService.createZone(createForm);
       alert('Зона создана успешно');
       setShowCreateModal(false);
-      setCreateForm({ name: '', address: '', is_active: true });
+      setCreateForm({ name: '', address: '', is_active: true, places_count: 10 });
       loadZones();
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Ошибка создания зоны');
@@ -244,6 +245,22 @@ export default function AdminPage() {
                   value={createForm.address}
                   onChange={(e) =>
                     setCreateForm({ ...createForm, address: e.target.value })
+                  }
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Количество мест
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  value={createForm.places_count}
+                  onChange={(e) =>
+                    setCreateForm({ ...createForm, places_count: parseInt(e.target.value) || 1 })
                   }
                   className="input-field"
                 />

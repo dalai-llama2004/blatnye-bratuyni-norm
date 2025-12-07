@@ -125,6 +125,11 @@ class Booking(Base):
         nullable=False,
         index=True,
     )
+    # Денормализованные данные для удобства
+    zone_name = Column(String(255), nullable=True)
+    zone_address = Column(String(255), nullable=True)
+    start_time = Column(DateTime, nullable=True)
+    end_time = Column(DateTime, nullable=True)
     status = Column(
         String(32),
         default="active",  # active / cancelled / completed

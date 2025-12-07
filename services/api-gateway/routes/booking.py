@@ -32,6 +32,16 @@ async def create_booking(request: Request, user=Depends(get_current_user)):
     resp = requests.post(f"{BOOKING_SERVICE_URL}/bookings", json=body, headers=headers)
     return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get('content-type',"application/json"))
 
+@router.post("/by-time")
+async def create_booking_by_time(request: Request, user=Depends(get_current_user)):
+    body = await request.json()
+    headers = {
+        "X-User-Id": str(user.get('user_id', user.get('sub'))),
+        "X-User-Role": user.get('role', 'user')
+    }
+    resp = requests.post(f"{BOOKING_SERVICE_URL}/bookings/by-time", json=body, headers=headers)
+    return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get('content-type',"application/json"))
+
 @router.post("/cancel")
 async def cancel(request: Request, user=Depends(get_current_user)):
     body = await request.json()
