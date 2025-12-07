@@ -10,6 +10,7 @@ import {
   ZoneCreate,
   ZoneUpdate,
   ZoneCloseRequest,
+  ZoneStatistics,
 } from '@/types';
 
 export const bookingService = {
@@ -58,7 +59,7 @@ export const bookingService = {
     date_from?: string;
     date_to?: string;
   }): Promise<Booking[]> {
-    const response = await api.get('/bookings/bookings/history', {
+    const response = await api.get('/bookings/history', {
       params: filters,
     });
     return response.data;
@@ -66,7 +67,7 @@ export const bookingService = {
 
   // Продлить бронирование
   async extendBooking(bookingId: number): Promise<Booking> {
-    const response = await api.post(`/bookings/bookings/${bookingId}/extend`);
+    const response = await api.post(`/bookings/${bookingId}/extend`);
     return response.data;
   },
 };
@@ -99,6 +100,12 @@ export const adminService = {
       `/admin/zones/${zoneId}/close`, // <-- исправлено
       data
     );
+    return response.data;
+  },
+
+  // Получить статистику по всем зонам
+  async getZonesStatistics(): Promise<ZoneStatistics[]> {
+    const response = await api.get('/admin/zones/statistics');
     return response.data;
   },
 };
