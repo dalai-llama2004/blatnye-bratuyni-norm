@@ -498,10 +498,19 @@ async def close_zone(
 ) -> List[models.Booking]:
     """
     Закрыть зону на обслуживание:
+    - установить is_active=False и сохранить причину закрытия;
     - найти все будущие активные брони в этой зоне за заданный интервал;
     - пометить их как cancelled;
     - вернуть список затронутых броней (для уведомлений).
     """
+    # Получить зону и установить is_active=False, сохранить причину
+    zone = await session.get(models.Zone, zone_id)
+    if zone is None:
+        return []
+    
+    zone.is_active = False
+    zone.closure_reason = data.reason
+    
     # Находим все брони через join: Booking -> Slot -> Place -> Zone
     stmt = (
         select(models.Booking)
@@ -522,9 +531,6 @@ async def close_zone(
     result = await session.execute(stmt)
     affected_bookings: List[models.Booking] = list(result.scalars().all())
 
-    if not affected_bookings:
-        return []
-
     # Отменяем все эти брони
     for booking in affected_bookings:
         booking.status = "cancelled"
@@ -533,7 +539,56 @@ async def close_zone(
 
     await session.commit()
     # Можно не делать refresh для всех, но на всякий случай:
+    await session.refresh(zone)
     for booking in affected_bookings:
         await session.refresh(booking)
 
     return affected_bookings
+
+
+async def get_zones_statistics(
+    session: AsyncSession,
+) -> List[schemas.ZoneStatistics]:
+    """
+    Получить статистику по всем зонам:
+    - количество активных бронирований (status=active)
+    - количество отмененных бронирований (status=cancelled)
+    
+    Использует единый запрос с условной агрегацией для избежания N+1 проблемы.
+    """
+    from sqlalchemy import func, case
+    
+    # Единый запрос с условной агрегацией для подсчета активных и отмененных броней
+    stmt = (
+        select(
+            models.Zone.id,
+            models.Zone.name,
+            func.count(
+                case((models.Booking.status == "active", 1))
+            ).label("active_bookings"),
+            func.count(
+                case((models.Booking.status == "cancelled", 1))
+            ).label("cancelled_bookings"),
+        )
+        .outerjoin(models.Place, models.Place.zone_id == models.Zone.id)
+        .outerjoin(models.Slot, models.Slot.place_id == models.Place.id)
+        .outerjoin(models.Booking, models.Booking.slot_id == models.Slot.id)
+        .group_by(models.Zone.id, models.Zone.name)
+        .order_by(models.Zone.name)
+    )
+    
+    result = await session.execute(stmt)
+    rows = result.all()
+    
+    statistics = []
+    for row in rows:
+        statistics.append(
+            schemas.ZoneStatistics(
+                zone_id=row.id,
+                zone_name=row.name,
+                active_bookings=row.active_bookings,
+                cancelled_bookings=row.cancelled_bookings,
+            )
+        )
+    
+    return statistics

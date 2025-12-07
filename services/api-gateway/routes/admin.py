@@ -80,3 +80,12 @@ async def close_zone(zone_id: int, request: Request, user=Depends(get_current_us
     }
     resp = requests.post(f"{BOOKING_SERVICE_URL}/admin/zones/{zone_id}/close", json=body, headers=headers)
     return proxy_response(resp)
+
+@router.get("/zones/statistics")
+async def get_zones_statistics(user=Depends(get_current_user)):
+    headers = {
+        "X-User-Id": str(user.get("user_id", user.get("sub"))),
+        "X-User-Role": user.get("role", "user"),
+    }
+    resp = requests.get(f"{BOOKING_SERVICE_URL}/admin/zones/statistics", headers=headers)
+    return proxy_response(resp)

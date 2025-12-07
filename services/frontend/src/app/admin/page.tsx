@@ -4,11 +4,12 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { bookingService, adminService } from '@/lib/booking';
 import { authService } from '@/lib/auth';
-import { Zone } from '@/types';
+import { Zone, ZoneStatistics } from '@/types';
 
 export default function AdminPage() {
   const router = useRouter();
   const [zones, setZones] = useState<Zone[]>([]);
+  const [statistics, setStatistics] = useState<ZoneStatistics[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -45,8 +46,12 @@ export default function AdminPage() {
 
   const loadZones = async () => {
     try {
-      const data = await bookingService.getZones();
-      setZones(data);
+      const [zonesData, statsData] = await Promise.all([
+        bookingService.getZones(),
+        adminService.getZonesStatistics(),
+      ]);
+      setZones(zonesData);
+      setStatistics(statsData);
       setLoading(false);
     } catch (err: any) {
       if (err.response?.status === 401) {
@@ -112,6 +117,7 @@ export default function AdminPage() {
       setShowCloseModal(false);
       setSelectedZone(null);
       setCloseForm({ reason: '', from_time: '', to_time: '' });
+      loadZones(); // Перезагрузить зоны для обновления статистики и статуса
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Ошибка закрытия зоны');
     }
@@ -162,52 +168,82 @@ export default function AdminPage() {
         <div className="card">
           <h2 className="text-xl font-semibold mb-4">Управление зонами</h2>
           <div className="space-y-4">
-            {zones.map((zone) => (
-              <div
-                key={zone.id}
-                className="border rounded-lg p-4 flex justify-between items-start"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center space-x-3 mb-2">
-                    <h3 className="text-lg font-semibold">{zone.name}</h3>
-                    <span
-                      className={`px-3 py-1 rounded-full text-sm font-medium ${
-                        zone.is_active
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
-                    >
-                      {zone.is_active ? 'Активна' : 'Неактивна'}
-                    </span>
+            {zones.map((zone) => {
+              // Найти статистику для этой зоны
+              const stats = statistics.find((s) => s.zone_id === zone.id);
+              
+              return (
+                <div
+                  key={zone.id}
+                  className="border rounded-lg p-4 flex justify-between items-start"
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-3 mb-2">
+                      <h3 className="text-lg font-semibold">{zone.name}</h3>
+                      <span
+                        className={`px-3 py-1 rounded-full text-sm font-medium ${
+                          zone.is_active
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}
+                      >
+                        {zone.is_active ? 'Активна' : 'Неактивна'}
+                      </span>
+                    </div>
+                    {zone.address && (
+                      <p className="text-gray-600 mb-1">{zone.address}</p>
+                    )}
+                    <p className="text-sm text-gray-500 mb-2">ID: {zone.id}</p>
+                    
+                    {/* Статистика по зоне */}
+                    {stats && (
+                      <div className="flex space-x-4 mb-2">
+                        <div className="text-sm">
+                          <span className="font-medium text-green-700">
+                            Активных бронирований: {stats.active_bookings}
+                          </span>
+                        </div>
+                        <div className="text-sm">
+                          <span className="font-medium text-red-700">
+                            Отменённых: {stats.cancelled_bookings}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Причина закрытия, если зона неактивна */}
+                    {!zone.is_active && zone.closure_reason && (
+                      <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
+                        <p className="text-sm text-yellow-800">
+                          <span className="font-medium">Причина закрытия:</span> {zone.closure_reason}
+                        </p>
+                      </div>
+                    )}
                   </div>
-                  {zone.address && (
-                    <p className="text-gray-600 mb-1">{zone.address}</p>
-                  )}
-                  <p className="text-sm text-gray-500">ID: {zone.id}</p>
-                </div>
 
-                <div className="flex space-x-2">
-                  <button
-                    onClick={() => openEditModal(zone)}
-                    className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                  >
-                    Редактировать
-                  </button>
-                  <button
-                    onClick={() => openCloseModal(zone)}
-                    className="px-3 py-2 text-sm bg-yellow-600 text-white rounded-md hover:bg-yellow-700"
-                  >
-                    Закрыть
-                  </button>
-                  <button
-                    onClick={() => handleDeleteZone(zone.id)}
-                    className="px-3 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700"
-                  >
-                    Удалить
-                  </button>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => openEditModal(zone)}
+                      className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                    >
+                      Редактировать
+                    </button>
+                    <button
+                      onClick={() => openCloseModal(zone)}
+                      className="px-3 py-2 text-sm bg-yellow-600 text-white rounded-md hover:bg-yellow-700"
+                    >
+                      Закрыть
+                    </button>
+                    <button
+                      onClick={() => handleDeleteZone(zone.id)}
+                      className="px-3 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700"
+                    >
+                      Удалить
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {zones.length === 0 && (
               <p className="text-gray-500 text-center py-4">Нет зон</p>
             )}

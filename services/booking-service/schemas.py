@@ -36,6 +36,7 @@ class ZoneOut(ORMBase):
     name: str
     address: Optional[str]
     is_active: bool
+    closure_reason: Optional[str]
     created_at: datetime
     updated_at: datetime
 
@@ -144,3 +145,11 @@ class ZoneCloseRequest(BaseModel):
     reason: str = Field(..., json_schema_extra={"example": "Плановая уборка"})
     from_time: datetime = Field(..., json_schema_extra={"example": "2025-02-01T10:00:00"})
     to_time: datetime = Field(..., json_schema_extra={"example": "2025-02-01T18:00:00"})
+
+
+class ZoneStatistics(BaseModel):
+    """Статистика по зоне"""
+    zone_id: int
+    zone_name: str
+    active_bookings: int
+    cancelled_bookings: int

@@ -96,3 +96,21 @@ async def close_zone_endpoint(
         data=data,
     )
     return affected_bookings
+
+
+@router.get(
+    "/zones/statistics",
+    response_model=List[schemas.ZoneStatistics],
+    summary="Получить статистику по всем зонам (admin)",
+)
+async def get_zones_statistics_endpoint(
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
+):
+    """
+    Возвращает статистику по всем зонам:
+    - количество активных бронирований
+    - количество отмененных бронирований
+    """
+    statistics = await crud.get_zones_statistics(session=session)
+    return statistics
