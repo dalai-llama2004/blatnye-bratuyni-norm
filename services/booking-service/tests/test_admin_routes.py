@@ -12,7 +12,8 @@ async def test_create_zone_admin_endpoint(test_client, test_session):
         json={
             "name": "New Zone",
             "address": "New Address",
-            "is_active": True
+            "is_active": True,
+            "places_count": 10
         },
         headers={"X-User-Id": "1", "X-User-Role": "admin"}
     )
@@ -31,7 +32,8 @@ async def test_create_zone_non_admin_forbidden(test_client, test_session):
         json={
             "name": "New Zone",
             "address": "New Address",
-            "is_active": True
+            "is_active": True,
+            "places_count": 10
         },
         headers={"X-User-Id": "1", "X-User-Role": "user"}
     )

@@ -13,7 +13,8 @@ async def test_create_and_get_zones(test_session):
     zone_data = schemas.ZoneCreate(
         name="Test Zone",
         address="Test Address",
-        is_active=True
+        is_active=True,
+        places_count=5
     )
     zone = await crud.create_zone(test_session, zone_data)
     
@@ -32,7 +33,7 @@ async def test_create_and_get_zones(test_session):
 async def test_update_zone(test_session):
     """Test updating a zone"""
     # Create a zone
-    zone_data = schemas.ZoneCreate(name="Old Name", address="Old Address", is_active=True)
+    zone_data = schemas.ZoneCreate(name="Old Name", address="Old Address", is_active=True, places_count=3)
     zone = await crud.create_zone(test_session, zone_data)
     
     # Update the zone
@@ -48,7 +49,7 @@ async def test_update_zone(test_session):
 async def test_delete_zone(test_session):
     """Test deleting a zone"""
     # Create a zone
-    zone_data = schemas.ZoneCreate(name="Test Zone", address="Test Address", is_active=True)
+    zone_data = schemas.ZoneCreate(name="Test Zone", address="Test Address", is_active=True, places_count=2)
     zone = await crud.create_zone(test_session, zone_data)
     
     # Delete the zone
