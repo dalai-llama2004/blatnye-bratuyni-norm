@@ -4,23 +4,29 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { bookingService } from '@/lib/booking';
 import { authService } from '@/lib/auth';
-import { Zone, Place, Slot } from '@/types';
+import { BOOKING_CONFIG } from '@/lib/constants';
+import { Zone } from '@/types';
 
 export default function ZonesPage() {
   const router = useRouter();
   const [zones, setZones] = useState<Zone[]>([]);
   const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
-  const [places, setPlaces] = useState<Place[]>([]);
-  const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
-  const [slots, setSlots] = useState<Slot[]>([]);
+  const [startHour, setStartHour] = useState<number>(9);
+  const [startMinute, setStartMinute] = useState<number>(0);
+  const [endHour, setEndHour] = useState<number>(12);
+  const [endMinute, setEndMinute] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [bookingSlot, setBookingSlot] = useState<number | null>(null);
+  const [bookingInProgress, setBookingInProgress] = useState(false);
   const [bookingError, setBookingError] = useState<string>('');
   const [bookingSuccess, setBookingSuccess] = useState<string>('');
+
+  // Генерация массивов для часов и минут
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const minutes = Array.from({ length: 60 / BOOKING_CONFIG.MINUTE_STEP }, (_, i) => i * BOOKING_CONFIG.MINUTE_STEP);
 
   useEffect(() => {
     loadZones();
@@ -37,65 +43,68 @@ export default function ZonesPage() {
     }
   };
 
-  const handleZoneSelect = async (zone: Zone) => {
+  const handleZoneSelect = (zone: Zone) => {
     setSelectedZone(zone);
-    setSelectedPlace(null);
-    setSlots([]);
+    setBookingError('');
+    setBookingSuccess('');
+  };
+
+  const validateTimeRange = (): string | null => {
+    const startTotalMinutes = startHour * 60 + startMinute;
+    const endTotalMinutes = endHour * 60 + endMinute;
     
-    try {
-      const data = await bookingService.getPlacesByZone(zone.id);
-      setPlaces(data.filter(p => p.is_active));
-    } catch (err) {
-      setError('Ошибка загрузки мест');
+    if (endTotalMinutes <= startTotalMinutes) {
+      return 'Время окончания должно быть позже времени начала';
     }
-  };
-
-  const handlePlaceSelect = async (place: Place) => {
-    setSelectedPlace(place);
-    await loadSlots(place.id, selectedDate);
-  };
-
-  const loadSlots = async (placeId: number, date: string) => {
-    try {
-      const data = await bookingService.getSlots(placeId, date);
-      setSlots(data);
-    } catch (err) {
-      setError('Ошибка загрузки слотов');
+    
+    const durationMinutes = endTotalMinutes - startTotalMinutes;
+    const durationHours = durationMinutes / 60;
+    
+    if (durationHours > BOOKING_CONFIG.MAX_BOOKING_HOURS) {
+      return `Бронирование не может быть длиннее ${BOOKING_CONFIG.MAX_BOOKING_HOURS} часов`;
     }
+    
+    return null;
   };
 
-  const handleDateChange = (date: string) => {
-    setSelectedDate(date);
-    if (selectedPlace) {
-      loadSlots(selectedPlace.id, date);
-    }
-  };
-
-  const handleBookSlot = async (slotId: number) => {
+  const handleBooking = async () => {
     if (!authService.isAuthenticated()) {
       router.push('/login');
       return;
     }
 
-    setBookingSlot(slotId);
+    if (!selectedZone) {
+      setBookingError('Выберите зону');
+      return;
+    }
+
+    const validationError = validateTimeRange();
+    if (validationError) {
+      setBookingError(validationError);
+      return;
+    }
+
+    setBookingInProgress(true);
     setBookingError('');
     setBookingSuccess('');
 
     try {
-      await bookingService.createBooking({ slot_id: slotId });
+      await bookingService.createBookingByTime({
+        zone_id: selectedZone.id,
+        date: selectedDate,
+        start_hour: startHour,
+        start_minute: startMinute,
+        end_hour: endHour,
+        end_minute: endMinute,
+      });
       setBookingSuccess('Бронирование успешно создано!');
-      
-      // Перезагружаем слоты
-      if (selectedPlace) {
-        await loadSlots(selectedPlace.id, selectedDate);
-      }
       
       // Скрыть сообщение через 3 секунды
       setTimeout(() => setBookingSuccess(''), 3000);
     } catch (err: any) {
       setBookingError(err.response?.data?.detail || 'Ошибка создания бронирования');
     } finally {
-      setBookingSlot(null);
+      setBookingInProgress(false);
     }
   };
 
@@ -111,7 +120,7 @@ export default function ZonesPage() {
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-8">
-          Зоны и места для бронирования
+          Зоны для бронирования
         </h1>
 
         {error && (
@@ -132,10 +141,10 @@ export default function ZonesPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Список зон */}
           <div className="card">
-            <h2 className="text-xl font-semibold mb-4">Зоны</h2>
+            <h2 className="text-xl font-semibold mb-4">Выберите зону</h2>
             <div className="space-y-2">
               {zones.map((zone) => (
                 <button
@@ -159,99 +168,101 @@ export default function ZonesPage() {
             </div>
           </div>
 
-          {/* Список мест */}
+          {/* Выбор времени */}
           <div className="card">
-            <h2 className="text-xl font-semibold mb-4">Места</h2>
+            <h2 className="text-xl font-semibold mb-4">Доступные слоты</h2>
             {!selectedZone ? (
               <p className="text-gray-500 text-center py-4">Выберите зону</p>
             ) : (
-              <div className="space-y-2">
-                {places.map((place) => (
-                  <button
-                    key={place.id}
-                    onClick={() => handlePlaceSelect(place)}
-                    className={`w-full text-left p-4 rounded-lg border-2 transition-colors ${
-                      selectedPlace?.id === place.id
-                        ? 'border-primary-500 bg-primary-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="font-medium">{place.name}</div>
-                  </button>
-                ))}
-                {places.length === 0 && (
-                  <p className="text-gray-500 text-center py-4">Нет доступных мест</p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Слоты */}
-          <div className="card">
-            <h2 className="text-xl font-semibold mb-4">Доступные слоты</h2>
-            {!selectedPlace ? (
-              <p className="text-gray-500 text-center py-4">Выберите место</p>
-            ) : (
-              <>
-                <div className="mb-4">
+              <div className="space-y-4">
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Дата
                   </label>
                   <input
                     type="date"
                     value={selectedDate}
-                    onChange={(e) => handleDateChange(e.target.value)}
+                    onChange={(e) => setSelectedDate(e.target.value)}
                     min={new Date().toISOString().split('T')[0]}
                     className="input-field"
                   />
                 </div>
 
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {slots.map((slot) => (
-                    <div
-                      key={slot.id}
-                      className={`p-4 rounded-lg border-2 ${
-                        slot.is_available
-                          ? 'border-green-200 bg-green-50'
-                          : 'border-gray-200 bg-gray-50'
-                      }`}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Приду в
+                  </label>
+                  <div className="flex space-x-2">
+                    <select
+                      value={startHour}
+                      onChange={(e) => setStartHour(parseInt(e.target.value))}
+                      className="input-field flex-1"
                     >
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <div className="font-medium">
-                            {new Date(slot.start_time).toLocaleTimeString('ru-RU', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}{' '}
-                            -{' '}
-                            {new Date(slot.end_time).toLocaleTimeString('ru-RU', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </div>
-                          <div className="text-sm text-gray-600">
-                            {slot.is_available ? 'Доступно' : 'Занято'}
-                          </div>
-                        </div>
-                        {slot.is_available && (
-                          <button
-                            onClick={() => handleBookSlot(slot.id)}
-                            disabled={bookingSlot === slot.id}
-                            className="btn-primary text-sm disabled:opacity-50"
-                          >
-                            {bookingSlot === slot.id ? 'Бронирую...' : 'Забронировать'}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                  {slots.length === 0 && (
-                    <p className="text-gray-500 text-center py-4">
-                      Нет доступных слотов на эту дату
-                    </p>
-                  )}
+                      {hours.map((h) => (
+                        <option key={h} value={h}>
+                          {h.toString().padStart(2, '0')} ч
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={startMinute}
+                      onChange={(e) => setStartMinute(parseInt(e.target.value))}
+                      className="input-field flex-1"
+                    >
+                      {minutes.map((m) => (
+                        <option key={m} value={m}>
+                          {m.toString().padStart(2, '0')} мин
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-              </>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Уйду в
+                  </label>
+                  <div className="flex space-x-2">
+                    <select
+                      value={endHour}
+                      onChange={(e) => setEndHour(parseInt(e.target.value))}
+                      className="input-field flex-1"
+                    >
+                      {hours.map((h) => (
+                        <option key={h} value={h}>
+                          {h.toString().padStart(2, '0')} ч
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={endMinute}
+                      onChange={(e) => setEndMinute(parseInt(e.target.value))}
+                      className="input-field flex-1"
+                    >
+                      {minutes.map((m) => (
+                        <option key={m} value={m}>
+                          {m.toString().padStart(2, '0')} мин
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="pt-4">
+                  <button
+                    onClick={handleBooking}
+                    disabled={bookingInProgress}
+                    className="btn-primary w-full disabled:opacity-50"
+                  >
+                    {bookingInProgress ? 'Бронирую...' : 'Забронировать'}
+                  </button>
+                </div>
+
+                <div className="text-sm text-gray-600 mt-2">
+                  <p>• Максимальная длительность: {BOOKING_CONFIG.MAX_BOOKING_HOURS} часов</p>
+                  <p>• Минуты кратны {BOOKING_CONFIG.MINUTE_STEP}</p>
+                </div>
+              </div>
             )}
           </div>
         </div>

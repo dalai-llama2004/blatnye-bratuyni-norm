@@ -78,6 +78,25 @@ async def create_booking(
 
 
 @router.post(
+    "/bookings/by-time",
+    response_model=schemas.BookingOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Создать бронь по времени",
+)
+async def create_booking_by_time(
+    booking_in: schemas.BookingCreateTimeRange,
+    session: AsyncSession = Depends(get_session),
+    user_id: int = Depends(get_current_user_id),
+):
+    booking = await crud.create_booking_by_time_range(session, user_id, booking_in)
+    if booking is None:
+        raise HTTPException(
+            400, "Невозможно создать бронь: нет свободных мест, некорректный интервал или превышен лимит в 6 часов"
+        )
+    return booking
+
+
+@router.post(
     "/bookings/cancel",
     response_model=schemas.BookingOut,
     summary="Отмена брони",
