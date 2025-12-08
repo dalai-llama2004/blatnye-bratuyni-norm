@@ -152,6 +152,7 @@ class ZoneCloseRequest(BaseModel):
 class BookingExtendTimeRequest(BaseModel):
     """
     Запрос на продление брони с указанием времени продления.
+    Минуты кратны 5 для упрощения управления слотами.
     """
     extend_hours: int = Field(..., ge=1, le=6, json_schema_extra={"example": 2})
     extend_minutes: int = Field(default=0, ge=0, le=55, json_schema_extra={"example": 0})

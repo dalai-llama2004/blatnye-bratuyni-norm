@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List, Optional
 
 from sqlalchemy import select, and_, func, case
@@ -527,8 +527,6 @@ async def extend_booking(
     - создаём или находим подходящий слот для продлённого времени;
     - создаём НОВУЮ бронь на продлённый период.
     """
-    from datetime import timedelta
-    
     booking = await get_booking_by_id(session, booking_id)
     if booking is None:
         return None

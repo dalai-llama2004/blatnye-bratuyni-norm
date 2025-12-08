@@ -167,7 +167,7 @@ async def test_extend_booking_with_custom_time(test_session):
     await test_session.flush()
     
     # Создаём слот на завтра
-    base_time = datetime.now() + timedelta(days=1)
+    base_time = datetime.utcnow() + timedelta(days=1)
     slot = models.Slot(
         place_id=place.id,
         start_time=base_time,
@@ -232,7 +232,7 @@ async def test_extend_booking_respects_max_hours(test_session):
     await test_session.flush()
     
     # Создаём слот на максимально допустимое время минус 1 час
-    base_time = datetime.now() + timedelta(days=1)
+    base_time = datetime.utcnow() + timedelta(days=1)
     slot = models.Slot(
         place_id=place.id,
         start_time=base_time,
