@@ -256,13 +256,14 @@ async def test_extend_booking_respects_max_hours(test_session):
     await test_session.commit()
     
     # Пытаемся продлить бронь на 2 часа (должно превысить лимит)
-    extended_booking = await crud.extend_booking(
-        test_session,
-        user_id=1,
-        booking_id=booking.id,
-        extend_hours=2,
-        extend_minutes=0,
-    )
+    with pytest.raises(crud.BookingExtensionError) as exc_info:
+        await crud.extend_booking(
+            test_session,
+            user_id=1,
+            booking_id=booking.id,
+            extend_hours=2,
+            extend_minutes=0,
+        )
     
-    # Должно вернуться None, так как превышен лимит
-    assert extended_booking is None
+    # Проверяем, что получили правильную ошибку
+    assert "максимальный лимит" in str(exc_info.value).lower()
