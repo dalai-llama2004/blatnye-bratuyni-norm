@@ -155,13 +155,15 @@ async def extend_booking(
     session: AsyncSession = Depends(get_session),
     user_id: int = Depends(get_current_user_id),
 ):
-    booking = await crud.extend_booking(
-        session, 
-        user_id, 
-        booking_id,
-        extend_hours=extend_data.extend_hours,
-        extend_minutes=extend_data.extend_minutes,
-    )
-    if booking is None:
-        raise HTTPException(400, "Невозможно продлить бронь")
-    return booking
+    try:
+        booking = await crud.extend_booking(
+            session, 
+            user_id, 
+            booking_id,
+            extend_hours=extend_data.extend_hours,
+            extend_minutes=extend_data.extend_minutes,
+        )
+        return booking
+    except crud.BookingExtensionError as e:
+        # Возвращаем детальное описание ошибки пользователю
+        raise HTTPException(400, str(e))

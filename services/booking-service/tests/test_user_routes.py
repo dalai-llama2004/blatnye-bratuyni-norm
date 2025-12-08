@@ -246,3 +246,72 @@ async def test_extend_booking_endpoint(test_client, test_session):
     data = response.json()
     assert data["slot_id"] == slot_2.id
     assert data["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_extend_booking_error_messages(test_client, test_session):
+    """Тест проверяет, что при ошибке продления брони возвращается понятное сообщение"""
+    from config import settings
+    
+    # Создаём зону и место
+    zone = models.Zone(name="Test Zone", address="Test Addr", is_active=True)
+    test_session.add(zone)
+    await test_session.flush()
+    
+    place = models.Place(zone_id=zone.id, name="Place 1", is_active=True)
+    test_session.add(place)
+    await test_session.flush()
+    
+    # Создаём слот на максимально допустимое время
+    start_time = datetime.now() + timedelta(days=1)
+    end_time = start_time + timedelta(hours=settings.MAX_BOOKING_HOURS)
+    slot = models.Slot(
+        place_id=place.id,
+        start_time=start_time,
+        end_time=end_time,
+        is_available=False
+    )
+    test_session.add(slot)
+    await test_session.flush()
+    
+    booking = models.Booking(
+        user_id=1, 
+        slot_id=slot.id, 
+        status="active",
+        zone_name=zone.name,
+        zone_address=zone.address,
+        start_time=start_time,
+        end_time=end_time,
+    )
+    test_session.add(booking)
+    await test_session.commit()
+    
+    # Пытаемся продлить бронь (должно превысить лимит)
+    response = await test_client.post(
+        f"/bookings/{booking.id}/extend",
+        json={"extend_hours": 1, "extend_minutes": 0},
+        headers={"X-User-Id": "1", "X-User-Role": "user"}
+    )
+    
+    # Проверяем, что получили ошибку 400 с понятным сообщением
+    assert response.status_code == 400
+    error_data = response.json()
+    assert "detail" in error_data
+    # Проверяем, что сообщение содержит полезную информацию, а не [object Object]
+    assert "максимальный лимит" in error_data["detail"].lower()
+    assert "часов" in error_data["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_extend_booking_not_found_error(test_client, test_session):
+    """Тест проверяет сообщение об ошибке для несуществующего бронирования"""
+    response = await test_client.post(
+        "/bookings/99999/extend",
+        json={"extend_hours": 1, "extend_minutes": 0},
+        headers={"X-User-Id": "1", "X-User-Role": "user"}
+    )
+    
+    assert response.status_code == 400
+    error_data = response.json()
+    assert "detail" in error_data
+    assert "не найдено" in error_data["detail"].lower()

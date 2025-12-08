@@ -507,13 +507,18 @@ async def get_booking_history(
     return list(result.scalars().all())
 
 
+class BookingExtensionError(Exception):
+    """Ошибка при попытке продлить бронь с детальным описанием причины"""
+    pass
+
+
 async def extend_booking(
     session: AsyncSession,
     user_id: int,
     booking_id: int,
     extend_hours: int = 1,
     extend_minutes: int = 0,
-) -> Optional[models.Booking]:
+) -> models.Booking:
     """
     Продление брони на заданное время.
 
@@ -526,23 +531,26 @@ async def extend_booking(
     - проверяем, что зона не будет переполнена;
     - создаём или находим подходящий слот для продлённого времени;
     - создаём НОВУЮ бронь на продлённый период.
+    
+    Raises:
+        BookingExtensionError: если продление невозможно с детальным описанием причины
     """
     booking = await get_booking_by_id(session, booking_id)
     if booking is None:
-        return None
+        raise BookingExtensionError("Бронирование не найдено")
 
     if booking.user_id != user_id:
-        return None
+        raise BookingExtensionError("Нет прав на продление этого бронирования")
 
     if booking.status != "active":
-        return None
+        raise BookingExtensionError("Можно продлить только активное бронирование")
 
     if booking.start_time is None or booking.end_time is None:
-        return None
+        raise BookingExtensionError("Некорректные данные бронирования")
 
     slot = booking.slot
     if slot is None:
-        return None
+        raise BookingExtensionError("Слот бронирования не найден")
 
     # Вычисляем новое время окончания
     new_end_time = booking.end_time + timedelta(hours=extend_hours, minutes=extend_minutes)
@@ -550,7 +558,9 @@ async def extend_booking(
     # Проверяем, что общая продолжительность брони не превышает MAX_BOOKING_HOURS
     total_duration = new_end_time - booking.start_time
     if total_duration.total_seconds() > settings.MAX_BOOKING_HOURS * 3600:
-        return None  # Превышен лимит
+        raise BookingExtensionError(
+            f"Превышен максимальный лимит бронирования ({settings.MAX_BOOKING_HOURS} часов)"
+        )
     
     # Проверяем, нет ли у пользователя пересекающихся активных броней (кроме текущей)
     has_conflict = await check_user_booking_conflicts(
@@ -561,7 +571,9 @@ async def extend_booking(
         exclude_booking_id=booking_id,
     )
     if has_conflict:
-        return None  # У пользователя уже есть другая бронь на это время
+        raise BookingExtensionError(
+            "У вас уже есть другое бронирование на это время"
+        )
     
     # Получаем zone для проверки вместимости и денормализации
     zone = None
@@ -578,7 +590,7 @@ async def extend_booking(
             zone = place.zone
     
     if zone is None:
-        return None
+        raise BookingExtensionError("Зона не найдена")
     
     # Проверяем, не будет ли переполнения зоны в новом интервале
     can_book = await check_zone_capacity(
@@ -588,7 +600,9 @@ async def extend_booking(
         end_time=new_end_time,
     )
     if not can_book:
-        return None  # Зона будет переполнена
+        raise BookingExtensionError(
+            "Зона переполнена на выбранное время. Попробуйте продлить на меньшее время"
+        )
 
     # Ищем существующий слот для продлённого времени или создаём новый
     stmt_exact = (
@@ -609,7 +623,9 @@ async def extend_booking(
         extended_slot.is_available = False
     # Если слот существует, но занят, не можем продлить
     elif extended_slot and not extended_slot.is_available:
-        return None
+        raise BookingExtensionError(
+            "Выбранное время уже занято. Попробуйте продлить на меньшее время"
+        )
     # Если слота нет, проверяем конфликты и создаём новый
     else:
         # Проверяем, нет ли пересекающихся слотов для этого места
@@ -629,7 +645,9 @@ async def extend_booking(
         # Если есть занятые пересекающиеся слоты, не можем продлить
         for overlap_slot in overlapping_slots:
             if not overlap_slot.is_available:
-                return None
+                raise BookingExtensionError(
+                    "Выбранное время частично занято. Попробуйте продлить на меньшее время"
+                )
         
         # Создаём новый слот
         extended_slot = models.Slot(
