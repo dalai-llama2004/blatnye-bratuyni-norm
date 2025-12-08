@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { bookingService } from '@/lib/booking';
 import { authService } from '@/lib/auth';
 import { Booking } from '@/types';
+import { formatMoscowTime } from '@/lib/timezone';
 
 export default function BookingsPage() {
   const router = useRouter();
@@ -233,18 +234,18 @@ export default function BookingsPage() {
                     {booking.start_time && booking.end_time && (
                       <p>
                         <span className="font-medium">Время бронирования:</span> с{' '}
-                        {new Date(booking.start_time).toLocaleString('ru-RU')} по{' '}
-                        {new Date(booking.end_time).toLocaleString('ru-RU')}
+                        {formatMoscowTime(booking.start_time)} по{' '}
+                        {formatMoscowTime(booking.end_time)}
                       </p>
                     )}
                     <p>Слот ID: {booking.slot_id}</p>
                     <p>
                       Создано:{' '}
-                      {new Date(booking.created_at).toLocaleString('ru-RU')}
+                      {formatMoscowTime(booking.created_at)}
                     </p>
                     <p>
                       Обновлено:{' '}
-                      {new Date(booking.updated_at).toLocaleString('ru-RU')}
+                      {formatMoscowTime(booking.updated_at)}
                     </p>
                     {booking.status === 'cancelled' && booking.cancellation_reason && (
                       <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded">
