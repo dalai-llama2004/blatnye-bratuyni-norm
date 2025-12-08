@@ -37,6 +37,7 @@ class ZoneOut(ORMBase):
     address: Optional[str]
     is_active: bool
     closure_reason: Optional[str]
+    closed_until: Optional[datetime]
     created_at: datetime
     updated_at: datetime
 
@@ -133,6 +134,7 @@ class BookingOut(ORMBase):
     start_time: Optional[datetime]
     end_time: Optional[datetime]
     status: str
+    cancellation_reason: Optional[str]
     created_at: datetime
     updated_at: datetime
 
@@ -147,12 +149,24 @@ class ZoneCloseRequest(BaseModel):
     to_time: datetime = Field(..., json_schema_extra={"example": "2025-02-01T18:00:00"})
 
 
+class BookingExtendTimeRequest(BaseModel):
+    """
+    Запрос на продление брони с указанием времени продления.
+    """
+    extend_hours: int = Field(..., ge=1, le=6, json_schema_extra={"example": 2})
+    extend_minutes: int = Field(default=0, ge=0, le=55, json_schema_extra={"example": 0})
+
+
 class ZoneStatistics(BaseModel):
     """Статистика по зоне"""
     zone_id: int
     zone_name: str
+    is_active: bool
+    closure_reason: Optional[str]
+    closed_until: Optional[datetime]
     active_bookings: int
     cancelled_bookings: int
+    current_occupancy: int  # Сколько человек сейчас в зоне
 
 
 class GlobalStatistics(BaseModel):

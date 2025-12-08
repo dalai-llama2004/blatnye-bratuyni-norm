@@ -25,6 +25,7 @@ class Zone(Base):
     address = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     closure_reason = Column(Text, nullable=True)  # Причина закрытия зоны
+    closed_until = Column(DateTime, nullable=True)  # До какого времени зона закрыта
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,
@@ -138,6 +139,7 @@ class Booking(Base):
         nullable=False,
         index=True,
     )
+    cancellation_reason = Column(Text, nullable=True)  # Причина отмены брони
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,

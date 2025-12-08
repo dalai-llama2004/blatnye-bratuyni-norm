@@ -20,6 +20,22 @@ from security import require_admin
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+@router.get(
+    "/zones",
+    response_model=List[schemas.ZoneOut],
+    summary="Получить все зоны (включая закрытые) (admin)",
+)
+async def get_all_zones_endpoint(
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
+):
+    """
+    Возвращает все зоны, включая закрытые.
+    Автоматически активирует зоны, у которых истекло время закрытия.
+    """
+    return await crud.get_zones(session=session, include_inactive=True)
+
+
 @router.post(
     "/zones",
     response_model=schemas.ZoneOut,
