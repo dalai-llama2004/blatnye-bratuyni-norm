@@ -60,7 +60,8 @@ def msk_to_utc(dt: datetime) -> datetime:
     """
     if dt.tzinfo is None:
         # Если naive datetime, считаем что это московское время
-        dt = MOSCOW_TZ.localize(dt)
+        # is_dst=None вызовет исключение при неоднозначном времени (DST переход)
+        dt = MOSCOW_TZ.localize(dt, is_dst=None)
     return dt.astimezone(pytz.UTC).replace(tzinfo=None)
 
 

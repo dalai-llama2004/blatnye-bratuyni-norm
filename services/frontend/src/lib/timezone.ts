@@ -28,18 +28,32 @@ export function toMoscowDatetimeLocal(date: Date | string): string {
 }
 
 /**
- * Парсит значение из datetime-local input как московское время и возвращает ISO строку.
+ * Парсит значение из datetime-local input как московское время и возвращает ISO строку в UTC.
  * @param datetimeLocal - Значение из datetime-local input (YYYY-MM-DDTHH:mm)
- * @returns ISO строка с московским временем
+ * @returns ISO строка в UTC для отправки на backend (без timezone суффикса)
  */
 export function fromMoscowDatetimeLocal(datetimeLocal: string): string {
-  // Создаем дату из локального значения, интерпретируя его как московское время
-  // datetime-local возвращает строку без timezone, поэтому мы добавляем timezone явно
-  const isoString = datetimeLocal + ':00'; // Добавляем секунды
+  // datetime-local возвращает строку без timezone в формате YYYY-MM-DDTHH:mm
+  // Мы интерпретируем это значение как московское время
   
-  // Возвращаем ISO строку (backend ожидает naive datetime, который интерпретируется как UTC)
-  // Но так как мы хотим работать с московским временем, нам нужно конвертировать
-  return isoString;
+  // Добавляем секунды и интерпретируем как московское время
+  const dateTimeWithSeconds = datetimeLocal + ':00';
+  
+  // Парсим строку и создаем Date объект, предполагая что это московское время
+  // Для этого мы создаем дату через конструктор и корректируем на московский offset
+  const [datePart, timePart] = datetimeLocal.split('T');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const [hour, minute] = timePart.split(':').map(Number);
+  
+  // Создаем дату как UTC (избегаем локальной интерпретации)
+  const utcDate = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
+  
+  // Москва это UTC+3, поэтому вычитаем 3 часа чтобы получить UTC время
+  const moscowOffsetMs = 3 * 60 * 60 * 1000;
+  const actualUtcDate = new Date(utcDate.getTime() - moscowOffsetMs);
+  
+  // Форматируем как ISO string без timezone (YYYY-MM-DDTHH:mm:ss)
+  return actualUtcDate.toISOString().slice(0, 19);
 }
 
 /**
@@ -69,10 +83,15 @@ export function formatMoscowTime(
 
 /**
  * Возвращает текущее время в московском часовом поясе.
- * @returns Date объект с текущим временем
+ * @returns Date объект с текущим временем в московском часовом поясе
  */
 export function nowMoscow(): Date {
-  return new Date();
+  // Получаем текущее время в московском часовом поясе
+  const now = new Date();
+  const moscowTimeString = now.toLocaleString('en-US', {
+    timeZone: MOSCOW_TZ,
+  });
+  return new Date(moscowTimeString);
 }
 
 /**
