@@ -220,6 +220,23 @@ export default function BookingsPage() {
                     </span>
                   </div>
                   <div className="text-sm text-gray-600 space-y-1">
+                    {booking.zone_name && (
+                      <p>
+                        <span className="font-medium">Зона:</span> {booking.zone_name}
+                      </p>
+                    )}
+                    {booking.zone_address && (
+                      <p>
+                        <span className="font-medium">Адрес:</span> {booking.zone_address}
+                      </p>
+                    )}
+                    {booking.start_time && booking.end_time && (
+                      <p>
+                        <span className="font-medium">Время бронирования:</span> с{' '}
+                        {new Date(booking.start_time).toLocaleString('ru-RU')} по{' '}
+                        {new Date(booking.end_time).toLocaleString('ru-RU')}
+                      </p>
+                    )}
                     <p>Слот ID: {booking.slot_id}</p>
                     <p>
                       Создано:{' '}
@@ -229,6 +246,13 @@ export default function BookingsPage() {
                       Обновлено:{' '}
                       {new Date(booking.updated_at).toLocaleString('ru-RU')}
                     </p>
+                    {booking.status === 'cancelled' && booking.cancellation_reason && (
+                      <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded">
+                        <p className="text-sm text-red-800">
+                          <span className="font-medium">Причина отмены:</span> {booking.cancellation_reason}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
