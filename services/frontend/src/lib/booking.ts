@@ -77,6 +77,12 @@ export const bookingService = {
 
 // Admin функции
 export const adminService = {
+  // Получить все зоны (включая закрытые) для админа
+  async getAdminZones(): Promise<Zone[]> {
+    const response = await api.get('/admin/zones');
+    return response.data;
+  },
+
   // Создать зону
   async createZone(data: ZoneCreate): Promise<Zone> {
     const response = await api.post('/admin/zones', data); // <-- исправлено (убран /bookings)

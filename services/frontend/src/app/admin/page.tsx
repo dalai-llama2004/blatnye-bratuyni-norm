@@ -47,8 +47,10 @@ export default function AdminPage() {
 
   const loadZones = async () => {
     try {
+      // Получаем все зоны через админский эндпоинт (включая закрытые)
+      // Также получаем статистику по всем зонам
       const [zonesData, statsData] = await Promise.all([
-        bookingService.getZones(),
+        adminService.getAdminZones(),
         adminService.getZonesStatistics(),
       ]);
       setZones(zonesData);

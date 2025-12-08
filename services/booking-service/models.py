@@ -27,8 +27,11 @@ class Zone(Base):
     name = Column(String(255), nullable=False)
     address = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
-    closure_reason = Column(Text, nullable=True)  # Причина закрытия зоны
-    closed_until = Column(DateTime, nullable=True)  # До какого времени зона закрыта (в UTC)
+    
+    # Поля для временного закрытия зоны
+    closure_reason = Column(Text, nullable=True)  # Причина закрытия зоны (например, "Плановая уборка", "Ремонт")
+    closed_until = Column(DateTime, nullable=True)  # До какого времени зона закрыта (в UTC, отображается в московском времени)
+    
     created_at = Column(DateTime, default=now_utc, nullable=False)
     updated_at = Column(
         DateTime,
@@ -131,7 +134,7 @@ class Booking(Base):
         nullable=False,
         index=True,
     )
-    # Денормализованные данные для удобства
+    # Денормализованные данные для удобства отображения истории
     zone_name = Column(String(255), nullable=True)
     zone_address = Column(String(255), nullable=True)
     start_time = Column(DateTime, nullable=True)
@@ -142,7 +145,8 @@ class Booking(Base):
         nullable=False,
         index=True,
     )
-    cancellation_reason = Column(Text, nullable=True)  # Причина отмены брони
+    # Причина отмены брони (например, "Зона закрыта: Плановая уборка" или причина от пользователя)
+    cancellation_reason = Column(Text, nullable=True)
     created_at = Column(DateTime, default=now_utc, nullable=False)
     updated_at = Column(
         DateTime,
