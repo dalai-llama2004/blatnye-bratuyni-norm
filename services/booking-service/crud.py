@@ -544,7 +544,9 @@ async def extend_booking(
         return None  # У пользователя уже есть другая бронь на это время
 
     # Получаем zone для денормализации
-    zone = next_slot.place.zone if next_slot.place else None
+    zone = None
+    if next_slot.place and next_slot.place.zone:
+        zone = next_slot.place.zone
     
     # Создаём новую бронь на следующий слот с денормализованными данными
     new_booking = models.Booking(
