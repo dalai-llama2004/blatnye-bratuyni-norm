@@ -24,6 +24,10 @@ async def get_zones(session: AsyncSession, include_inactive: bool = False) -> Li
     
     Параметры:
     - include_inactive: если True, вернуть все зоны (включая неактивные)
+    
+    Примечание:
+    Функция автоматически проверяет и активирует зоны, у которых истекло время закрытия.
+    Это обеспечивает автоматическое переоткрытие зон по московскому времени.
     """
     # Автоматически активируем зоны, у которых истекло время закрытия
     # Используем московское время, конвертируем в UTC для сравнения с БД
@@ -41,6 +45,7 @@ async def get_zones(session: AsyncSession, include_inactive: bool = False) -> Li
     result = await session.execute(stmt_reactivate)
     zones_to_reactivate = list(result.scalars().all())
     
+    # Реактивируем зоны и очищаем информацию о закрытии
     for zone in zones_to_reactivate:
         zone.is_active = True
         zone.closure_reason = None
@@ -762,8 +767,11 @@ async def close_zone(
     Закрыть зону на обслуживание:
     - установить is_active=False и сохранить причину закрытия и время до которого закрыта;
     - найти все будущие активные брони в этой зоне за заданный интервал;
-    - пометить их как cancelled с указанием причины;
+    - пометить их как cancelled с указанием причины от администратора;
     - вернуть список затронутых броней (для уведомлений).
+    
+    Важно: функция автоматически отменяет ВСЕ активные брони в указанном временном 
+    диапазоне и добавляет причину отмены в формате "Зона закрыта: {причина}".
     
     Примечание: from_time и to_time приходят из фронтенда в московском времени,
     но сохраняются в БД как naive UTC datetime для совместимости.
@@ -773,13 +781,15 @@ async def close_zone(
     if zone is None:
         return []
     
+    # Помечаем зону как закрытую и сохраняем причину и время переоткрытия
     zone.is_active = False
     zone.closure_reason = data.reason
     # Время закрытия сохраняется в UTC (приходит из фронтенда в московском времени,
     # но Pydantic парсит его как naive datetime, который мы храним в БД как UTC)
     zone.closed_until = data.to_time
     
-    # Находим все брони через join: Booking -> Slot -> Place -> Zone
+    # Находим все активные брони в этой зоне в указанном временном диапазоне
+    # через join: Booking -> Slot -> Place -> Zone
     stmt = (
         select(models.Booking)
         .join(models.Slot, models.Slot.id == models.Booking.slot_id)
@@ -799,15 +809,17 @@ async def close_zone(
     result = await session.execute(stmt)
     affected_bookings: List[models.Booking] = list(result.scalars().all())
 
-    # Отменяем все эти брони с указанием причины
+    # Автоматически отменяем все найденные брони с указанием причины от админа
     for booking in affected_bookings:
         booking.status = "cancelled"
+        # Причина отмены в формате "Зона закрыта: {причина от админа}"
         booking.cancellation_reason = f"Зона закрыта: {data.reason}"
+        # Освобождаем слот для возможного будущего использования
         if booking.slot:
             booking.slot.is_available = True
 
     await session.commit()
-    # Можно не делать refresh для всех, но на всякий случай:
+    # Обновляем объекты из БД для получения актуальных данных
     await session.refresh(zone)
     for booking in affected_bookings:
         await session.refresh(booking)
