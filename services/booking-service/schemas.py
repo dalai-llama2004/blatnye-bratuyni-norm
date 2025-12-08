@@ -153,3 +153,10 @@ class ZoneStatistics(BaseModel):
     zone_name: str
     active_bookings: int
     cancelled_bookings: int
+
+
+class GlobalStatistics(BaseModel):
+    """Общая статистика по всем зонам"""
+    total_active_bookings: int
+    total_cancelled_bookings: int
+    users_in_coworking_now: int

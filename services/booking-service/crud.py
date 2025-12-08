@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, date
 from typing import List, Optional
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -121,6 +121,18 @@ async def create_booking(
     existing = result.scalar_one_or_none()
     if existing is not None:
         return None
+    
+    # 2.1. Проверить, не будет ли переполнения зоны
+    zone = slot.place.zone if slot.place else None
+    if zone:
+        can_book = await check_zone_capacity(
+            session=session,
+            zone_id=zone.id,
+            start_time=slot.start_time,
+            end_time=slot.end_time,
+        )
+        if not can_book:
+            return None  # Зона будет переполнена
 
     # 3. Создать бронь с денормализованными данными
     zone = slot.place.zone if slot.place else None
@@ -193,6 +205,16 @@ async def create_booking_by_time_range(
     if zone is None or not zone.is_active:
         return None
     
+    # Проверить, не будет ли переполнения зоны
+    can_book = await check_zone_capacity(
+        session=session,
+        zone_id=zone.id,
+        start_time=start_time,
+        end_time=end_time,
+    )
+    if not can_book:
+        return None  # Зона будет переполнена
+    
     # Получить активные места в зоне
     stmt = (
         select(models.Place)
@@ -211,45 +233,28 @@ async def create_booking_by_time_range(
     
     # Ищем свободное место
     for place in places:
-        # Проверяем, нет ли пересечений с существующими слотами
-        stmt = (
+        # Сначала проверяем, есть ли уже слот с точно таким же временем
+        stmt_exact = (
             select(models.Slot)
             .where(
                 and_(
                     models.Slot.place_id == place.id,
-                    # Проверка пересечения интервалов
-                    models.Slot.start_time < end_time,
-                    models.Slot.end_time > start_time,
+                    models.Slot.start_time == start_time,
+                    models.Slot.end_time == end_time,
                 )
             )
         )
-        result = await session.execute(stmt)
-        overlapping_slots = list(result.scalars().all())
+        result_exact = await session.execute(stmt_exact)
+        exact_slot = result_exact.scalar_one_or_none()
         
-        # Если есть пересекающиеся слоты, проверяем их доступность
-        has_conflict = False
-        for slot in overlapping_slots:
-            # Если слот недоступен, значит есть конфликт
-            if not slot.is_available:
-                has_conflict = True
-                break
-        
-        # Если нет конфликтов, это место свободно
-        if not has_conflict:
-            # Создаем слот
-            slot = models.Slot(
-                place_id=place.id,
-                start_time=start_time,
-                end_time=end_time,
-                is_available=False,
-            )
-            session.add(slot)
-            await session.flush()  # Получить slot.id
+        # Если есть точный слот и он доступен, используем его
+        if exact_slot and exact_slot.is_available:
+            exact_slot.is_available = False
             
             # Создаем бронь
             booking = models.Booking(
                 user_id=user_id,
-                slot_id=slot.id,
+                slot_id=exact_slot.id,
                 status="active",
                 zone_name=zone.name,
                 zone_address=zone.address,
@@ -261,6 +266,62 @@ async def create_booking_by_time_range(
             await session.commit()
             await session.refresh(booking)
             return booking
+        
+        # Если точный слот уже занят, пропускаем это место
+        if exact_slot and not exact_slot.is_available:
+            continue
+        
+        # Проверяем, нет ли пересечений с существующими слотами (если точного слота нет)
+        if not exact_slot:
+            stmt = (
+                select(models.Slot)
+                .where(
+                    and_(
+                        models.Slot.place_id == place.id,
+                        # Проверка пересечения интервалов
+                        models.Slot.start_time < end_time,
+                        models.Slot.end_time > start_time,
+                    )
+                )
+            )
+            result = await session.execute(stmt)
+            overlapping_slots = list(result.scalars().all())
+            
+            # Если есть пересекающиеся слоты, проверяем их доступность
+            has_conflict = False
+            for slot in overlapping_slots:
+                # Если слот недоступен, значит есть конфликт
+                if not slot.is_available:
+                    has_conflict = True
+                    break
+            
+            # Если нет конфликтов, это место свободно - создаем новый слот
+            if not has_conflict:
+                # Создаем слот
+                slot = models.Slot(
+                    place_id=place.id,
+                    start_time=start_time,
+                    end_time=end_time,
+                    is_available=False,
+                )
+                session.add(slot)
+                await session.flush()  # Получить slot.id
+                
+                # Создаем бронь
+                booking = models.Booking(
+                    user_id=user_id,
+                    slot_id=slot.id,
+                    status="active",
+                    zone_name=zone.name,
+                    zone_address=zone.address,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+                session.add(booking)
+                
+                await session.commit()
+                await session.refresh(booking)
+                return booking
     
     # Нет свободных мест
     return None
@@ -556,8 +617,6 @@ async def get_zones_statistics(
     
     Использует единый запрос с условной агрегацией для избежания N+1 проблемы.
     """
-    from sqlalchemy import func, case
-    
     # Единый запрос с условной агрегацией для подсчета активных и отмененных броней
     stmt = (
         select(
@@ -592,3 +651,134 @@ async def get_zones_statistics(
         )
     
     return statistics
+
+
+async def get_global_statistics(
+    session: AsyncSession,
+) -> schemas.GlobalStatistics:
+    """
+    Получить общую статистику:
+    - общее число активных бронирований (status=active)
+    - общее число отмененных бронирований (status=cancelled)
+    - число пользователей "прямо сейчас" в коворкинге
+    """
+    # Подсчет активных и отмененных бронирований
+    stmt = select(
+        func.count(models.Booking.id).filter(models.Booking.status == "active").label("active_count"),
+        func.count(models.Booking.id).filter(models.Booking.status == "cancelled").label("cancelled_count"),
+    )
+    result = await session.execute(stmt)
+    row = result.one()
+    
+    total_active = row.active_count or 0
+    total_cancelled = row.cancelled_count or 0
+    
+    # Подсчет пользователей прямо сейчас в коворкинге
+    # Берем все активные брони, у которых start_time <= now < end_time
+    now = datetime.utcnow()
+    stmt = select(func.count(func.distinct(models.Booking.user_id))).where(
+        and_(
+            models.Booking.status == "active",
+            models.Booking.start_time <= now,
+            models.Booking.end_time > now,
+        )
+    )
+    result = await session.execute(stmt)
+    users_now = result.scalar() or 0
+    
+    return schemas.GlobalStatistics(
+        total_active_bookings=total_active,
+        total_cancelled_bookings=total_cancelled,
+        users_in_coworking_now=users_now,
+    )
+
+
+async def check_zone_capacity(
+    session: AsyncSession,
+    zone_id: int,
+    start_time: datetime,
+    end_time: datetime,
+) -> bool:
+    """
+    Проверить, не будет ли переполнения зоны в заданном временном интервале.
+    
+    Алгоритм:
+    1. Получить количество мест в зоне (это максимальная вместимость)
+    2. Найти все активные брони в зоне, пересекающиеся с заданным интервалом
+    3. Для каждой точки времени в интервале проверить, что число активных броней не превышает количество мест
+    
+    Возвращает True, если зона НЕ переполнена (бронь можно создать)
+    Возвращает False, если зона будет переполнена
+    """
+    # Получить количество активных мест в зоне
+    stmt = select(func.count(models.Place.id)).where(
+        and_(
+            models.Place.zone_id == zone_id,
+            models.Place.is_active.is_(True),
+        )
+    )
+    result = await session.execute(stmt)
+    max_capacity = result.scalar() or 0
+    
+    if max_capacity == 0:
+        return False  # Нет мест в зоне
+    
+    # Найти все активные брони в зоне, пересекающиеся с заданным интервалом
+    # Используем денормализованные поля start_time и end_time в Booking
+    stmt = (
+        select(models.Booking)
+        .join(models.Slot, models.Slot.id == models.Booking.slot_id)
+        .join(models.Place, models.Place.id == models.Slot.place_id)
+        .where(
+            and_(
+                models.Place.zone_id == zone_id,
+                models.Booking.status == "active",
+                models.Booking.start_time < end_time,
+                models.Booking.end_time > start_time,
+            )
+        )
+    )
+    result = await session.execute(stmt)
+    overlapping_bookings = list(result.scalars().all())
+    
+    # Создаем список критических точек времени (начала и концы броней)
+    # для проверки максимальной загрузки в каждой точке
+    time_points = []
+    
+    # Добавляем начало и конец нашей новой брони
+    time_points.append(start_time)
+    time_points.append(end_time)
+    
+    # Добавляем начала и концы всех пересекающихся броней
+    for booking in overlapping_bookings:
+        if booking.start_time and booking.end_time:
+            time_points.append(booking.start_time)
+            time_points.append(booking.end_time)
+    
+    # Сортируем точки времени
+    time_points = sorted(set(time_points))
+    
+    # Проверяем загрузку в каждый момент времени
+    # Проверяем все точки, включая start_time и end_time
+    for check_time in time_points:
+        # Проверяем только точки внутри нашего интервала [start_time, end_time)
+        if check_time < start_time or check_time >= end_time:
+            continue
+        
+        # Считаем количество активных броней в этот момент времени
+        # Используем полуоткрытый интервал [start, end)
+        active_count = 0
+        for booking in overlapping_bookings:
+            if (booking.start_time and booking.end_time and
+                booking.start_time <= check_time < booking.end_time):
+                active_count += 1
+        
+        # Добавляем нашу новую бронь (она активна в интервале [start_time, end_time))
+        if start_time <= check_time < end_time:
+            active_count += 1
+        
+        # Проверяем переполнение
+        if active_count > max_capacity:
+            return False  # Переполнение обнаружено
+    
+    return True  # Зона не переполнена

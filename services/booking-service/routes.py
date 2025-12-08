@@ -72,7 +72,8 @@ async def create_booking(
     booking = await crud.create_booking(session, user_id, booking_in)
     if booking is None:
         raise HTTPException(
-            400, "Невозможно создать бронь"
+            status.HTTP_409_CONFLICT, 
+            "Невозможно создать бронь: слот недоступен или зона переполнена"
         )
     return booking
 
@@ -91,7 +92,8 @@ async def create_booking_by_time(
     booking = await crud.create_booking_by_time_range(session, user_id, booking_in)
     if booking is None:
         raise HTTPException(
-            400, "Невозможно создать бронь: нет свободных мест, некорректный интервал или превышен лимит в 6 часов"
+            status.HTTP_409_CONFLICT,
+            "Невозможно создать бронь: нет свободных мест, некорректный интервал, превышен лимит в 6 часов или зона переполнена"
         )
     return booking
 
