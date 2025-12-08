@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List, Optional
 
 from sqlalchemy import select, and_, func, case
@@ -17,13 +17,46 @@ from config import settings
 # ============================================================
 
 
-async def get_zones(session: AsyncSession) -> List[models.Zone]:
-    """Вернуть все активные зоны (по умолчанию)."""
-    stmt = (
+async def get_zones(session: AsyncSession, include_inactive: bool = False) -> List[models.Zone]:
+    """
+    Вернуть все зоны.
+    
+    Параметры:
+    - include_inactive: если True, вернуть все зоны (включая неактивные)
+    """
+    # Автоматически активируем зоны, у которых истекло время закрытия
+    now = datetime.utcnow()
+    stmt_reactivate = (
         select(models.Zone)
-        .where(models.Zone.is_active.is_(True))
-        .order_by(models.Zone.name)
+        .where(
+            and_(
+                models.Zone.is_active.is_(False),
+                models.Zone.closed_until.isnot(None),
+                models.Zone.closed_until <= now,
+            )
+        )
     )
+    result = await session.execute(stmt_reactivate)
+    zones_to_reactivate = list(result.scalars().all())
+    
+    for zone in zones_to_reactivate:
+        zone.is_active = True
+        zone.closure_reason = None
+        zone.closed_until = None
+    
+    if zones_to_reactivate:
+        await session.commit()
+    
+    # Вернуть зоны согласно фильтру
+    if include_inactive:
+        stmt = select(models.Zone).order_by(models.Zone.name)
+    else:
+        stmt = (
+            select(models.Zone)
+            .where(models.Zone.is_active.is_(True))
+            .order_by(models.Zone.name)
+        )
+    
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
@@ -478,15 +511,21 @@ async def extend_booking(
     session: AsyncSession,
     user_id: int,
     booking_id: int,
+    extend_hours: int = 1,
+    extend_minutes: int = 0,
 ) -> Optional[models.Booking]:
     """
-    Продление брони на следующий слот.
+    Продление брони на заданное время.
 
-    Логика (упрощённо):
+    Логика:
     - находим бронь;
     - проверяем, что она активна и принадлежит пользователю;
-    - находим следующий слот для того же места (start_time = end_time текущего слота);
-    - если он свободен, создаём НОВУЮ бронь на следующий слот.
+    - вычисляем новое время окончания (end_time + extend_hours + extend_minutes);
+    - проверяем, что продление не превышает MAX_BOOKING_HOURS от начала брони;
+    - проверяем отсутствие конфликтов с другими бронями пользователя;
+    - проверяем, что зона не будет переполнена;
+    - создаём или находим подходящий слот для продлённого времени;
+    - создаём НОВУЮ бронь на продлённый период.
     """
     booking = await get_booking_by_id(session, booking_id)
     if booking is None:
@@ -498,68 +537,121 @@ async def extend_booking(
     if booking.status != "active":
         return None
 
+    if booking.start_time is None or booking.end_time is None:
+        return None
+
     slot = booking.slot
     if slot is None:
         return None
 
-    # Ищем следующий слот с загрузкой place и zone для денормализации
-    stmt = (
-        select(models.Slot)
-        .options(joinedload(models.Slot.place).joinedload(models.Place.zone))
-        .where(
-            and_(
-                models.Slot.place_id == slot.place_id,
-                models.Slot.start_time == slot.end_time,
-                models.Slot.is_available.is_(True),
-            )
-        )
-    )
-    result = await session.execute(stmt)
-    next_slot = result.scalar_one_or_none()
-    if next_slot is None:
-        return None
-
-    # Проверяем, нет ли уже активной брони этого пользователя на этот слот
-    stmt = select(models.Booking).where(
-        and_(
-            models.Booking.user_id == user_id,
-            models.Booking.slot_id == next_slot.id,
-            models.Booking.status == "active",
-        )
-    )
-    result = await session.execute(stmt)
-    existing = result.scalar_one_or_none()
-    if existing is not None:
-        return None
+    # Вычисляем новое время окончания
+    new_end_time = booking.end_time + timedelta(hours=extend_hours, minutes=extend_minutes)
     
-    # Проверяем, нет ли у пользователя других пересекающихся броней (кроме текущей)
+    # Проверяем, что общая продолжительность брони не превышает MAX_BOOKING_HOURS
+    total_duration = new_end_time - booking.start_time
+    if total_duration.total_seconds() > settings.MAX_BOOKING_HOURS * 3600:
+        return None  # Превышен лимит
+    
+    # Проверяем, нет ли у пользователя пересекающихся активных броней (кроме текущей)
     has_conflict = await check_user_booking_conflicts(
         session=session,
         user_id=user_id,
-        start_time=next_slot.start_time,
-        end_time=next_slot.end_time,
+        start_time=booking.end_time,
+        end_time=new_end_time,
         exclude_booking_id=booking_id,
     )
     if has_conflict:
         return None  # У пользователя уже есть другая бронь на это время
-
-    # Получаем zone для денормализации
-    zone = None
-    if next_slot.place and next_slot.place.zone:
-        zone = next_slot.place.zone
     
-    # Создаём новую бронь на следующий слот с денормализованными данными
+    # Получаем zone для проверки вместимости и денормализации
+    zone = None
+    if slot.place:
+        # Загружаем zone для place
+        stmt = (
+            select(models.Place)
+            .options(joinedload(models.Place.zone))
+            .where(models.Place.id == slot.place_id)
+        )
+        result = await session.execute(stmt)
+        place = result.scalar_one_or_none()
+        if place and place.zone:
+            zone = place.zone
+    
+    if zone is None:
+        return None
+    
+    # Проверяем, не будет ли переполнения зоны в новом интервале
+    can_book = await check_zone_capacity(
+        session=session,
+        zone_id=zone.id,
+        start_time=booking.end_time,
+        end_time=new_end_time,
+    )
+    if not can_book:
+        return None  # Зона будет переполнена
+
+    # Ищем существующий слот для продлённого времени или создаём новый
+    stmt_exact = (
+        select(models.Slot)
+        .where(
+            and_(
+                models.Slot.place_id == slot.place_id,
+                models.Slot.start_time == booking.end_time,
+                models.Slot.end_time == new_end_time,
+            )
+        )
+    )
+    result_exact = await session.execute(stmt_exact)
+    extended_slot = result_exact.scalar_one_or_none()
+    
+    # Если слот существует и доступен, используем его
+    if extended_slot and extended_slot.is_available:
+        extended_slot.is_available = False
+    # Если слот существует, но занят, не можем продлить
+    elif extended_slot and not extended_slot.is_available:
+        return None
+    # Если слота нет, проверяем конфликты и создаём новый
+    else:
+        # Проверяем, нет ли пересекающихся слотов для этого места
+        stmt_overlap = (
+            select(models.Slot)
+            .where(
+                and_(
+                    models.Slot.place_id == slot.place_id,
+                    models.Slot.start_time < new_end_time,
+                    models.Slot.end_time > booking.end_time,
+                )
+            )
+        )
+        result_overlap = await session.execute(stmt_overlap)
+        overlapping_slots = list(result_overlap.scalars().all())
+        
+        # Если есть занятые пересекающиеся слоты, не можем продлить
+        for overlap_slot in overlapping_slots:
+            if not overlap_slot.is_available:
+                return None
+        
+        # Создаём новый слот
+        extended_slot = models.Slot(
+            place_id=slot.place_id,
+            start_time=booking.end_time,
+            end_time=new_end_time,
+            is_available=False,
+        )
+        session.add(extended_slot)
+        await session.flush()  # Получить extended_slot.id
+    
+    # Создаём новую бронь на продлённый период с денормализованными данными
     new_booking = models.Booking(
         user_id=user_id,
-        slot_id=next_slot.id,
+        slot_id=extended_slot.id,
         status="active",
         zone_name=zone.name if zone else None,
         zone_address=zone.address if zone else None,
-        start_time=next_slot.start_time,
-        end_time=next_slot.end_time,
+        start_time=booking.end_time,
+        end_time=new_end_time,
     )
     session.add(new_booking)
-    next_slot.is_available = False
 
     await session.commit()
     await session.refresh(new_booking)
@@ -636,18 +728,19 @@ async def close_zone(
 ) -> List[models.Booking]:
     """
     Закрыть зону на обслуживание:
-    - установить is_active=False и сохранить причину закрытия;
+    - установить is_active=False и сохранить причину закрытия и время до которого закрыта;
     - найти все будущие активные брони в этой зоне за заданный интервал;
-    - пометить их как cancelled;
+    - пометить их как cancelled с указанием причины;
     - вернуть список затронутых броней (для уведомлений).
     """
-    # Получить зону и установить is_active=False, сохранить причину
+    # Получить зону и установить is_active=False, сохранить причину и время
     zone = await session.get(models.Zone, zone_id)
     if zone is None:
         return []
     
     zone.is_active = False
     zone.closure_reason = data.reason
+    zone.closed_until = data.to_time
     
     # Находим все брони через join: Booking -> Slot -> Place -> Zone
     stmt = (
@@ -669,9 +762,10 @@ async def close_zone(
     result = await session.execute(stmt)
     affected_bookings: List[models.Booking] = list(result.scalars().all())
 
-    # Отменяем все эти брони
+    # Отменяем все эти брони с указанием причины
     for booking in affected_bookings:
         booking.status = "cancelled"
+        booking.cancellation_reason = f"Зона закрыта: {data.reason}"
         if booking.slot:
             booking.slot.is_available = True
 
@@ -691,25 +785,49 @@ async def get_zones_statistics(
     Получить статистику по всем зонам:
     - количество активных бронирований (status=active)
     - количество отмененных бронирований (status=cancelled)
+    - текущая загрузка зоны (сколько человек сейчас в зоне)
     
     Использует единый запрос с условной агрегацией для избежания N+1 проблемы.
     """
+    now = datetime.utcnow()
+    
     # Единый запрос с условной агрегацией для подсчета активных и отмененных броней
     stmt = (
         select(
             models.Zone.id,
             models.Zone.name,
+            models.Zone.is_active,
+            models.Zone.closure_reason,
+            models.Zone.closed_until,
             func.count(
                 case((models.Booking.status == "active", 1))
             ).label("active_bookings"),
             func.count(
                 case((models.Booking.status == "cancelled", 1))
             ).label("cancelled_bookings"),
+            func.count(
+                case(
+                    (
+                        and_(
+                            models.Booking.status == "active",
+                            models.Booking.start_time <= now,
+                            models.Booking.end_time > now,
+                        ),
+                        1
+                    )
+                )
+            ).label("current_occupancy"),
         )
         .outerjoin(models.Place, models.Place.zone_id == models.Zone.id)
         .outerjoin(models.Slot, models.Slot.place_id == models.Place.id)
         .outerjoin(models.Booking, models.Booking.slot_id == models.Slot.id)
-        .group_by(models.Zone.id, models.Zone.name)
+        .group_by(
+            models.Zone.id,
+            models.Zone.name,
+            models.Zone.is_active,
+            models.Zone.closure_reason,
+            models.Zone.closed_until,
+        )
         .order_by(models.Zone.name)
     )
     
@@ -722,8 +840,12 @@ async def get_zones_statistics(
             schemas.ZoneStatistics(
                 zone_id=row.id,
                 zone_name=row.name,
+                is_active=row.is_active,
+                closure_reason=row.closure_reason,
+                closed_until=row.closed_until,
                 active_bookings=row.active_bookings,
                 cancelled_bookings=row.cancelled_bookings,
+                current_occupancy=row.current_occupancy,
             )
         )
     
