@@ -169,11 +169,19 @@ async def test_extend_booking(test_session):
     test_session.add(slot_2)
     await test_session.flush()
     
-    booking = models.Booking(user_id=1, slot_id=slot_1.id, status="active")
+    booking = models.Booking(
+        user_id=1, 
+        slot_id=slot_1.id, 
+        status="active",
+        zone_name=zone.name,
+        zone_address=zone.address,
+        start_time=start_time_1,
+        end_time=end_time_1,
+    )
     test_session.add(booking)
     await test_session.flush()
     
-    # Extend the booking
+    # Extend the booking (по умолчанию на 1 час)
     new_booking = await crud.extend_booking(test_session, user_id=1, booking_id=booking.id)
     
     assert new_booking is not None

@@ -224,13 +224,22 @@ async def test_extend_booking_endpoint(test_client, test_session):
     test_session.add(slot_2)
     await test_session.flush()
     
-    booking = models.Booking(user_id=1, slot_id=slot_1.id, status="active")
+    booking = models.Booking(
+        user_id=1, 
+        slot_id=slot_1.id, 
+        status="active",
+        zone_name=zone.name,
+        zone_address=zone.address,
+        start_time=start_time_1,
+        end_time=end_time_1,
+    )
     test_session.add(booking)
     await test_session.commit()
     
     # Test endpoint
     response = await test_client.post(
         f"/bookings/{booking.id}/extend",
+        json={"extend_hours": 1, "extend_minutes": 0},
         headers={"X-User-Id": "1", "X-User-Role": "user"}
     )
     assert response.status_code == 200
