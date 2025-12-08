@@ -114,3 +114,22 @@ async def get_zones_statistics_endpoint(
     """
     statistics = await crud.get_zones_statistics(session=session)
     return statistics
+
+
+@router.get(
+    "/statistics",
+    response_model=schemas.GlobalStatistics,
+    summary="Получить общую статистику (admin)",
+)
+async def get_global_statistics_endpoint(
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
+):
+    """
+    Возвращает общую статистику:
+    - общее число активных бронирований (status=active)
+    - общее число отмененных бронирований (status=cancelled)
+    - число пользователей "прямо сейчас" в коворкинге
+    """
+    statistics = await crud.get_global_statistics(session=session)
+    return statistics
