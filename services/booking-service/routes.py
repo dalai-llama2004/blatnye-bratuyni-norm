@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import crud
 import schemas
+from crud import BookingExtensionError
 from db import get_session
 
 router = APIRouter(tags=["booking"])
@@ -164,6 +165,6 @@ async def extend_booking(
             extend_minutes=extend_data.extend_minutes,
         )
         return booking
-    except crud.BookingExtensionError as e:
+    except BookingExtensionError as e:
         # Возвращаем детальное описание ошибки пользователю
         raise HTTPException(400, str(e))
