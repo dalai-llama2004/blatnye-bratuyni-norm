@@ -4,7 +4,11 @@ CREATE TABLE IF NOT EXISTS bookings.zones (
     id SERIAL PRIMARY KEY,
     name VARCHAR(120) NOT NULL,
     address VARCHAR(255) NOT NULL,
-    places_count INT
+    places_count INT,
+    is_active BOOLEAN DEFAULT TRUE NOT NULL,
+    closure_reason TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW() NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS bookings.places (

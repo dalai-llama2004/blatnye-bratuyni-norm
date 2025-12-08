@@ -7,6 +7,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     Index,
 )
@@ -23,7 +24,7 @@ class Zone(Base):
     name = Column(String(255), nullable=False)
     address = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
-    closure_reason = Column(String(500), nullable=True)  # Причина закрытия зоны
+    closure_reason = Column(Text, nullable=True)  # Причина закрытия зоны
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,

@@ -24,6 +24,7 @@ services:
       - "5433:5432"
     volumes:
       - ./pgdata/booking:/var/lib/postgresql/data
+      - ./services/database/init.sql:/docker-entrypoint-initdb.d/init.sql
 
   notification-db:
     image: postgres:16
