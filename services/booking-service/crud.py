@@ -233,45 +233,28 @@ async def create_booking_by_time_range(
     
     # Ищем свободное место
     for place in places:
-        # Проверяем, нет ли пересечений с существующими слотами
-        stmt = (
+        # Сначала проверяем, есть ли уже слот с точно таким же временем
+        stmt_exact = (
             select(models.Slot)
             .where(
                 and_(
                     models.Slot.place_id == place.id,
-                    # Проверка пересечения интервалов
-                    models.Slot.start_time < end_time,
-                    models.Slot.end_time > start_time,
+                    models.Slot.start_time == start_time,
+                    models.Slot.end_time == end_time,
                 )
             )
         )
-        result = await session.execute(stmt)
-        overlapping_slots = list(result.scalars().all())
+        result_exact = await session.execute(stmt_exact)
+        exact_slot = result_exact.scalar_one_or_none()
         
-        # Если есть пересекающиеся слоты, проверяем их доступность
-        has_conflict = False
-        for slot in overlapping_slots:
-            # Если слот недоступен, значит есть конфликт
-            if not slot.is_available:
-                has_conflict = True
-                break
-        
-        # Если нет конфликтов, это место свободно
-        if not has_conflict:
-            # Создаем слот
-            slot = models.Slot(
-                place_id=place.id,
-                start_time=start_time,
-                end_time=end_time,
-                is_available=False,
-            )
-            session.add(slot)
-            await session.flush()  # Получить slot.id
+        # Если есть точный слот и он доступен, используем его
+        if exact_slot and exact_slot.is_available:
+            exact_slot.is_available = False
             
             # Создаем бронь
             booking = models.Booking(
                 user_id=user_id,
-                slot_id=slot.id,
+                slot_id=exact_slot.id,
                 status="active",
                 zone_name=zone.name,
                 zone_address=zone.address,
@@ -283,6 +266,62 @@ async def create_booking_by_time_range(
             await session.commit()
             await session.refresh(booking)
             return booking
+        
+        # Если точный слот уже занят, пропускаем это место
+        if exact_slot and not exact_slot.is_available:
+            continue
+        
+        # Проверяем, нет ли пересечений с существующими слотами (если точного слота нет)
+        if not exact_slot:
+            stmt = (
+                select(models.Slot)
+                .where(
+                    and_(
+                        models.Slot.place_id == place.id,
+                        # Проверка пересечения интервалов
+                        models.Slot.start_time < end_time,
+                        models.Slot.end_time > start_time,
+                    )
+                )
+            )
+            result = await session.execute(stmt)
+            overlapping_slots = list(result.scalars().all())
+            
+            # Если есть пересекающиеся слоты, проверяем их доступность
+            has_conflict = False
+            for slot in overlapping_slots:
+                # Если слот недоступен, значит есть конфликт
+                if not slot.is_available:
+                    has_conflict = True
+                    break
+            
+            # Если нет конфликтов, это место свободно - создаем новый слот
+            if not has_conflict:
+                # Создаем слот
+                slot = models.Slot(
+                    place_id=place.id,
+                    start_time=start_time,
+                    end_time=end_time,
+                    is_available=False,
+                )
+                session.add(slot)
+                await session.flush()  # Получить slot.id
+                
+                # Создаем бронь
+                booking = models.Booking(
+                    user_id=user_id,
+                    slot_id=slot.id,
+                    status="active",
+                    zone_name=zone.name,
+                    zone_address=zone.address,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+                session.add(booking)
+                
+                await session.commit()
+                await session.refresh(booking)
+                return booking
     
     # Нет свободных мест
     return None
