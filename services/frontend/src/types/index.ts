@@ -46,6 +46,7 @@ export interface Zone {
   address: string | null;
   is_active: boolean;
   closure_reason: string | null;
+  closed_until: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -76,6 +77,7 @@ export interface Booking {
   start_time: string | null;
   end_time: string | null;
   status: string;
+  cancellation_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -120,6 +122,10 @@ export interface ZoneCloseRequest {
 export interface ZoneStatistics {
   zone_id: number;
   zone_name: string;
+  is_active: boolean;
+  closure_reason: string | null;
+  closed_until: string | null;
   active_bookings: number;
   cancelled_bookings: number;
+  current_occupancy: number;
 }

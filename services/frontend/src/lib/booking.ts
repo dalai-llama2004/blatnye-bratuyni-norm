@@ -66,8 +66,11 @@ export const bookingService = {
   },
 
   // Продлить бронирование
-  async extendBooking(bookingId: number): Promise<Booking> {
-    const response = await api.post(`/bookings/${bookingId}/extend`);
+  async extendBooking(bookingId: number, extendHours: number = 1, extendMinutes: number = 0): Promise<Booking> {
+    const response = await api.post(`/bookings/${bookingId}/extend`, {
+      extend_hours: extendHours,
+      extend_minutes: extendMinutes,
+    });
     return response.data;
   },
 };

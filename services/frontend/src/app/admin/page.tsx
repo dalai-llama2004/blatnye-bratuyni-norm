@@ -187,7 +187,7 @@ export default function AdminPage() {
                             : 'bg-red-100 text-red-800'
                         }`}
                       >
-                        {zone.is_active ? 'Активна' : 'Неактивна'}
+                        {zone.is_active ? 'Активна' : 'Закрыта'}
                       </span>
                     </div>
                     {zone.address && (
@@ -197,7 +197,7 @@ export default function AdminPage() {
                     
                     {/* Статистика по зоне */}
                     {stats && (
-                      <div className="flex space-x-4 mb-2">
+                      <div className="flex flex-wrap gap-4 mb-2">
                         <div className="text-sm">
                           <span className="font-medium text-green-700">
                             Активных бронирований: {stats.active_bookings}
@@ -208,15 +208,28 @@ export default function AdminPage() {
                             Отменённых: {stats.cancelled_bookings}
                           </span>
                         </div>
+                        <div className="text-sm">
+                          <span className="font-medium text-blue-700">
+                            Пользователей сейчас: {stats.current_occupancy}
+                          </span>
+                        </div>
                       </div>
                     )}
                     
-                    {/* Причина закрытия, если зона неактивна */}
-                    {!zone.is_active && zone.closure_reason && (
-                      <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
-                        <p className="text-sm text-yellow-800">
-                          <span className="font-medium">Причина закрытия:</span> {zone.closure_reason}
-                        </p>
+                    {/* Информация о закрытии зоны */}
+                    {!zone.is_active && (
+                      <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                        {zone.closure_reason && (
+                          <p className="text-sm text-yellow-800 mb-1">
+                            <span className="font-medium">Причина закрытия:</span> {zone.closure_reason}
+                          </p>
+                        )}
+                        {zone.closed_until && (
+                          <p className="text-sm text-yellow-800">
+                            <span className="font-medium">Дата переоткрытия:</span>{' '}
+                            {new Date(zone.closed_until).toLocaleString('ru-RU')}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
