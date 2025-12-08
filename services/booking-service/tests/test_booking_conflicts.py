@@ -295,6 +295,7 @@ async def test_extend_booking_with_time_conflict(test_client, test_session):
     # Пытаемся продлить первую бронь
     response = await test_client.post(
         f"/bookings/{booking1.id}/extend",
+        json={"extension_hours": 1},
         headers={"X-User-Id": "1", "X-User-Role": "user"}
     )
     # Должна вернуться ошибка 400, так как у пользователя уже есть бронь на это время

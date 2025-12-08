@@ -150,10 +150,13 @@ async def booking_history(
 )
 async def extend_booking(
     booking_id: int,
+    extend_request: schemas.BookingExtendRequest,
     session: AsyncSession = Depends(get_session),
     user_id: int = Depends(get_current_user_id),
 ):
-    booking = await crud.extend_booking(session, user_id, booking_id)
+    booking = await crud.extend_booking(
+        session, user_id, booking_id, extend_request.extension_hours
+    )
     if booking is None:
         raise HTTPException(400, "Невозможно продлить бронь")
     return booking

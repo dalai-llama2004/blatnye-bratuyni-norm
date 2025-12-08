@@ -28,6 +28,16 @@ async def get_zones(session: AsyncSession) -> List[models.Zone]:
     return list(result.scalars().all())
 
 
+async def get_all_zones(session: AsyncSession) -> List[models.Zone]:
+    """Вернуть все зоны (включая закрытые)."""
+    stmt = (
+        select(models.Zone)
+        .order_by(models.Zone.name)
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def get_places_by_zone(
     session: AsyncSession,
     zone_id: int,
@@ -478,16 +488,22 @@ async def extend_booking(
     session: AsyncSession,
     user_id: int,
     booking_id: int,
+    extension_hours: int = 1,
 ) -> Optional[models.Booking]:
     """
-    Продление брони на следующий слот.
-
-    Логика (упрощённо):
+    Продление брони на указанное количество часов.
+    
+    Логика:
     - находим бронь;
     - проверяем, что она активна и принадлежит пользователю;
-    - находим следующий слот для того же места (start_time = end_time текущего слота);
-    - если он свободен, создаём НОВУЮ бронь на следующий слот.
+    - вычисляем новое end_time = current_end_time + extension_hours;
+    - проверяем, что не превышен лимит MAX_BOOKING_HOURS для общей длительности;
+    - проверяем, что нет конфликтов с другими бронями;
+    - проверяем, что не будет переполнения зоны;
+    - создаём или находим подходящий слот и создаём новую бронь.
     """
+    from datetime import timedelta
+    
     booking = await get_booking_by_id(session, booking_id)
     if booking is None:
         return None
@@ -501,65 +517,116 @@ async def extend_booking(
     slot = booking.slot
     if slot is None:
         return None
-
-    # Ищем следующий слот с загрузкой place и zone для денормализации
+    
+    # Загружаем place и zone для slot
+    stmt = (
+        select(models.Slot)
+        .options(joinedload(models.Slot.place).joinedload(models.Place.zone))
+        .where(models.Slot.id == slot.id)
+    )
+    result = await session.execute(stmt)
+    slot = result.scalar_one_or_none()
+    if slot is None or slot.place is None:
+        return None
+    
+    # Используем денормализованные данные или берем из слота
+    current_start_time = booking.start_time if booking.start_time else slot.start_time
+    current_end_time = booking.end_time if booking.end_time else slot.end_time
+    
+    # Вычисляем новое время окончания
+    new_end_time = current_end_time + timedelta(hours=extension_hours)
+    
+    # Проверяем, что общая длительность не превышает лимит
+    total_duration = new_end_time - current_start_time
+    if total_duration.total_seconds() > settings.MAX_BOOKING_HOURS * 3600:
+        return None  # Превышен лимит
+    
+    # Проверяем, нет ли у пользователя других пересекающихся броней (кроме текущей)
+    has_conflict = await check_user_booking_conflicts(
+        session=session,
+        user_id=user_id,
+        start_time=current_end_time,
+        end_time=new_end_time,
+        exclude_booking_id=booking_id,
+    )
+    if has_conflict:
+        return None  # У пользователя уже есть другая бронь на это время
+    
+    # Получаем zone для проверки переполнения
+    zone = slot.place.zone if slot.place else None
+    if zone is None or not zone.is_active:
+        return None  # Зона неактивна
+    
+    # Проверяем, не будет ли переполнения зоны
+    can_book = await check_zone_capacity(
+        session=session,
+        zone_id=zone.id,
+        start_time=current_end_time,
+        end_time=new_end_time,
+    )
+    if not can_book:
+        return None  # Зона будет переполнена
+    
+    # Ищем существующий слот с точно таким временем или создаём новый
     stmt = (
         select(models.Slot)
         .options(joinedload(models.Slot.place).joinedload(models.Place.zone))
         .where(
             and_(
                 models.Slot.place_id == slot.place_id,
-                models.Slot.start_time == slot.end_time,
-                models.Slot.is_available.is_(True),
+                models.Slot.start_time == current_end_time,
+                models.Slot.end_time == new_end_time,
             )
         )
     )
     result = await session.execute(stmt)
-    next_slot = result.scalar_one_or_none()
-    if next_slot is None:
-        return None
-
-    # Проверяем, нет ли уже активной брони этого пользователя на этот слот
-    stmt = select(models.Booking).where(
-        and_(
-            models.Booking.user_id == user_id,
-            models.Booking.slot_id == next_slot.id,
-            models.Booking.status == "active",
+    extension_slot = result.scalar_one_or_none()
+    
+    if extension_slot is None:
+        # Проверяем, нет ли пересекающихся слотов на этом месте
+        stmt = (
+            select(models.Slot)
+            .where(
+                and_(
+                    models.Slot.place_id == slot.place_id,
+                    models.Slot.start_time < new_end_time,
+                    models.Slot.end_time > current_end_time,
+                    models.Slot.is_available.is_(False),
+                )
+            )
         )
-    )
-    result = await session.execute(stmt)
-    existing = result.scalar_one_or_none()
-    if existing is not None:
-        return None
+        result = await session.execute(stmt)
+        conflicting_slots = list(result.scalars().all())
+        
+        if conflicting_slots:
+            return None  # Есть конфликтующие недоступные слоты
+        
+        # Создаём новый слот
+        extension_slot = models.Slot(
+            place_id=slot.place_id,
+            start_time=current_end_time,
+            end_time=new_end_time,
+            is_available=False,
+        )
+        session.add(extension_slot)
+        await session.flush()
+    else:
+        # Если слот существует, проверяем его доступность
+        if not extension_slot.is_available:
+            return None  # Слот уже занят
+        extension_slot.is_available = False
     
-    # Проверяем, нет ли у пользователя других пересекающихся броней (кроме текущей)
-    has_conflict = await check_user_booking_conflicts(
-        session=session,
-        user_id=user_id,
-        start_time=next_slot.start_time,
-        end_time=next_slot.end_time,
-        exclude_booking_id=booking_id,
-    )
-    if has_conflict:
-        return None  # У пользователя уже есть другая бронь на это время
-
-    # Получаем zone для денормализации
-    zone = None
-    if next_slot.place and next_slot.place.zone:
-        zone = next_slot.place.zone
-    
-    # Создаём новую бронь на следующий слот с денормализованными данными
+    # Создаём новую бронь на продление с денормализованными данными
     new_booking = models.Booking(
         user_id=user_id,
-        slot_id=next_slot.id,
+        slot_id=extension_slot.id,
         status="active",
         zone_name=zone.name if zone else None,
         zone_address=zone.address if zone else None,
-        start_time=next_slot.start_time,
-        end_time=next_slot.end_time,
+        start_time=extension_slot.start_time,
+        end_time=extension_slot.end_time,
     )
     session.add(new_booking)
-    next_slot.is_available = False
 
     await session.commit()
     await session.refresh(new_booking)
@@ -636,18 +703,21 @@ async def close_zone(
 ) -> List[models.Booking]:
     """
     Закрыть зону на обслуживание:
-    - установить is_active=False и сохранить причину закрытия;
-    - найти все будущие активные брони в этой зоне за заданный интервал;
+    - установить is_active=False и сохранить причину закрытия и время окончания закрытия;
+    - найти все активные брони в этой зоне в заданном интервале;
     - пометить их как cancelled;
     - вернуть список затронутых броней (для уведомлений).
+    
+    Зона автоматически откроется после окончания времени закрытия (to_time).
     """
-    # Получить зону и установить is_active=False, сохранить причину
+    # Получить зону и установить is_active=False, сохранить причину и время окончания
     zone = await session.get(models.Zone, zone_id)
     if zone is None:
         return []
     
     zone.is_active = False
     zone.closure_reason = data.reason
+    zone.closure_end_time = data.to_time
     
     # Находим все брони через join: Booking -> Slot -> Place -> Zone
     stmt = (
@@ -859,3 +929,42 @@ async def check_zone_capacity(
             return False  # Переполнение обнаружено
     
     return True  # Зона не переполнена
+
+
+async def reopen_closed_zones(
+    session: AsyncSession,
+) -> List[models.Zone]:
+    """
+    Проверить и переоткрыть зоны, у которых истекло время закрытия.
+    
+    Возвращает список переоткрытых зон.
+    """
+    now = datetime.utcnow()
+    
+    # Найти все закрытые зоны, у которых истекло время закрытия
+    stmt = (
+        select(models.Zone)
+        .where(
+            and_(
+                models.Zone.is_active.is_(False),
+                models.Zone.closure_end_time.isnot(None),
+                models.Zone.closure_end_time <= now,
+            )
+        )
+    )
+    
+    result = await session.execute(stmt)
+    zones_to_reopen = list(result.scalars().all())
+    
+    # Переоткрываем зоны
+    for zone in zones_to_reopen:
+        zone.is_active = True
+        zone.closure_reason = None
+        zone.closure_end_time = None
+    
+    if zones_to_reopen:
+        await session.commit()
+        for zone in zones_to_reopen:
+            await session.refresh(zone)
+    
+    return zones_to_reopen

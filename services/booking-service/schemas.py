@@ -37,6 +37,7 @@ class ZoneOut(ORMBase):
     address: Optional[str]
     is_active: bool
     closure_reason: Optional[str]
+    closure_end_time: Optional[datetime]
     created_at: datetime
     updated_at: datetime
 
@@ -109,10 +110,10 @@ class BookingCancelRequest(BaseModel):
 
 class BookingExtendRequest(BaseModel):
     """
-    По факту тело не обязательно, но оставим
-    на будущее (например, опция "продлить на 2 часа")
+    Запрос на продление брони.
+    extension_hours - количество часов для продления (по умолчанию 1 час)
     """
-    pass
+    extension_hours: int = Field(default=1, ge=1, le=6, json_schema_extra={"example": 2})
 
 
 class BookingHistoryFilters(BaseModel):

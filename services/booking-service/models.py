@@ -25,6 +25,7 @@ class Zone(Base):
     address = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     closure_reason = Column(Text, nullable=True)  # Причина закрытия зоны
+    closure_end_time = Column(DateTime, nullable=True)  # Время окончания закрытия зоны (для автоматического переоткрытия)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,

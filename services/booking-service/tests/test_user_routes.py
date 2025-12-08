@@ -231,6 +231,7 @@ async def test_extend_booking_endpoint(test_client, test_session):
     # Test endpoint
     response = await test_client.post(
         f"/bookings/{booking.id}/extend",
+        json={"extension_hours": 1},
         headers={"X-User-Id": "1", "X-User-Role": "user"}
     )
     assert response.status_code == 200

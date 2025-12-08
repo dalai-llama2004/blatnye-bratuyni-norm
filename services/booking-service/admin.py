@@ -133,3 +133,37 @@ async def get_global_statistics_endpoint(
     """
     statistics = await crud.get_global_statistics(session=session)
     return statistics
+
+
+@router.get(
+    "/zones/all",
+    response_model=List[schemas.ZoneOut],
+    summary="Получить все зоны включая закрытые (admin)",
+)
+async def get_all_zones_endpoint(
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
+):
+    """
+    Возвращает все зоны, включая закрытые.
+    Закрытые зоны показываются со статусом is_active=False и причиной закрытия.
+    """
+    zones = await crud.get_all_zones(session=session)
+    return zones
+
+
+@router.post(
+    "/zones/reopen-expired",
+    response_model=List[schemas.ZoneOut],
+    summary="Переоткрыть зоны с истекшим временем закрытия (admin)",
+)
+async def reopen_expired_zones_endpoint(
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
+):
+    """
+    Проверяет и переоткрывает зоны, у которых истекло время закрытия.
+    Возвращает список переоткрытых зон.
+    """
+    reopened_zones = await crud.reopen_closed_zones(session=session)
+    return reopened_zones

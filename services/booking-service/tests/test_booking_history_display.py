@@ -128,6 +128,7 @@ async def test_extended_booking_shows_time_range(test_client, test_session):
     # Продлеваем бронь
     response = await test_client.post(
         f"/bookings/{booking.id}/extend",
+        json={"extension_hours": 1},
         headers={"X-User-Id": "1", "X-User-Role": "user"}
     )
     assert response.status_code == 200
