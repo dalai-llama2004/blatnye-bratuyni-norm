@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS bookings.zones (
     id SERIAL PRIMARY KEY,
     name VARCHAR(120) NOT NULL,
     address VARCHAR(255) NOT NULL,
-    places_count INT
+    places_count INT,
+    closure_reason TEXT DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS bookings.places (
