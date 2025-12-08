@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { bookingService, adminService } from '@/lib/booking';
 import { authService } from '@/lib/auth';
 import { Zone, ZoneStatistics } from '@/types';
+import { formatMoscowTime, toMoscowDatetimeLocal, fromMoscowDatetimeLocal } from '@/lib/timezone';
 
 export default function AdminPage() {
   const router = useRouter();
@@ -110,7 +111,12 @@ export default function AdminPage() {
     if (!selectedZone) return;
 
     try {
-      const affectedBookings = await adminService.closeZone(selectedZone.id, closeForm);
+      // Преобразуем время из datetime-local в формат для API
+      const affectedBookings = await adminService.closeZone(selectedZone.id, {
+        reason: closeForm.reason,
+        from_time: fromMoscowDatetimeLocal(closeForm.from_time),
+        to_time: fromMoscowDatetimeLocal(closeForm.to_time),
+      });
       alert(
         `Зона закрыта. Отменено бронирований: ${affectedBookings.length}`
       );
@@ -227,7 +233,7 @@ export default function AdminPage() {
                         {zone.closed_until && (
                           <p className="text-sm text-yellow-800">
                             <span className="font-medium">Дата переоткрытия:</span>{' '}
-                            {new Date(zone.closed_until).toLocaleString('ru-RU')}
+                            {formatMoscowTime(zone.closed_until)}
                           </p>
                         )}
                       </div>
@@ -465,6 +471,10 @@ export default function AdminPage() {
                   }
                   className="input-field"
                 />
+              </div>
+
+              <div className="text-sm text-gray-600">
+                <p>Время указывается по московскому часовому поясу (МСК)</p>
               </div>
 
               <div className="flex space-x-2">

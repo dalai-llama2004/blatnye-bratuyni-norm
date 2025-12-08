@@ -13,6 +13,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, relationship
 
+# Импорт утилиты для работы с московским временем
+from timezone_utils import now_utc
+
 # Базовый класс для всех ORM-моделей
 Base = declarative_base()
 
@@ -25,12 +28,12 @@ class Zone(Base):
     address = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     closure_reason = Column(Text, nullable=True)  # Причина закрытия зоны
-    closed_until = Column(DateTime, nullable=True)  # До какого времени зона закрыта
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    closed_until = Column(DateTime, nullable=True)  # До какого времени зона закрыта (в UTC)
+    created_at = Column(DateTime, default=now_utc, nullable=False)
     updated_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=now_utc,
+        onupdate=now_utc,
         nullable=False,
     )
 
@@ -57,11 +60,11 @@ class Place(Base):
     )
     name = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=now_utc, nullable=False)
     updated_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=now_utc,
+        onupdate=now_utc,
         nullable=False,
     )
 
@@ -140,11 +143,11 @@ class Booking(Base):
         index=True,
     )
     cancellation_reason = Column(Text, nullable=True)  # Причина отмены брони
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=now_utc, nullable=False)
     updated_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=now_utc,
+        onupdate=now_utc,
         nullable=False,
     )
 

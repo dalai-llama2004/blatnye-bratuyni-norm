@@ -10,6 +10,7 @@ from sqlalchemy.orm import joinedload
 import models
 import schemas
 from config import settings
+from timezone_utils import now_msk, msk_to_utc
 
 
 # ============================================================
@@ -25,7 +26,8 @@ async def get_zones(session: AsyncSession, include_inactive: bool = False) -> Li
     - include_inactive: если True, вернуть все зоны (включая неактивные)
     """
     # Автоматически активируем зоны, у которых истекло время закрытия
-    now = datetime.utcnow()
+    # Используем московское время, конвертируем в UTC для сравнения с БД
+    now = msk_to_utc(now_msk())
     stmt_reactivate = (
         select(models.Zone)
         .where(
@@ -762,6 +764,9 @@ async def close_zone(
     - найти все будущие активные брони в этой зоне за заданный интервал;
     - пометить их как cancelled с указанием причины;
     - вернуть список затронутых броней (для уведомлений).
+    
+    Примечание: from_time и to_time приходят из фронтенда в московском времени,
+    но сохраняются в БД как naive UTC datetime для совместимости.
     """
     # Получить зону и установить is_active=False, сохранить причину и время
     zone = await session.get(models.Zone, zone_id)
@@ -770,6 +775,8 @@ async def close_zone(
     
     zone.is_active = False
     zone.closure_reason = data.reason
+    # Время закрытия сохраняется в UTC (приходит из фронтенда в московском времени,
+    # но Pydantic парсит его как naive datetime, который мы храним в БД как UTC)
     zone.closed_until = data.to_time
     
     # Находим все брони через join: Booking -> Slot -> Place -> Zone
@@ -819,7 +826,8 @@ async def get_zones_statistics(
     
     Использует единый запрос с условной агрегацией для избежания N+1 проблемы.
     """
-    now = datetime.utcnow()
+    # Используем московское время, конвертируем в UTC для сравнения с БД
+    now = msk_to_utc(now_msk())
     
     # Единый запрос с условной агрегацией для подсчета активных и отмененных броней
     stmt = (
@@ -904,7 +912,8 @@ async def get_global_statistics(
     
     # Подсчет пользователей прямо сейчас в коворкинге
     # Берем все активные брони, у которых start_time <= now < end_time
-    now = datetime.utcnow()
+    # Используем московское время, конвертируем в UTC для сравнения с БД
+    now = msk_to_utc(now_msk())
     stmt = select(func.count(func.distinct(models.Booking.user_id))).where(
         and_(
             models.Booking.status == "active",
