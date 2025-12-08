@@ -759,22 +759,23 @@ async def check_zone_capacity(
     time_points = sorted(set(time_points))
     
     # Проверяем загрузку в каждый момент времени
-    for i in range(len(time_points) - 1):
-        check_time = time_points[i]
-        
-        # Если точка не входит в наш интервал, пропускаем
+    # Проверяем все точки, включая start_time и end_time
+    for check_time in time_points:
+        # Проверяем только точки внутри нашего интервала [start_time, end_time)
         if check_time < start_time or check_time >= end_time:
             continue
         
         # Считаем количество активных броней в этот момент времени
+        # Используем полуоткрытый интервал [start, end)
         active_count = 0
         for booking in overlapping_bookings:
             if (booking.start_time and booking.end_time and
                 booking.start_time <= check_time < booking.end_time):
                 active_count += 1
         
-        # Добавляем нашу новую бронь
-        active_count += 1
+        # Добавляем нашу новую бронь (она активна в интервале [start_time, end_time))
+        if start_time <= check_time < end_time:
+            active_count += 1
         
         # Проверяем переполнение
         if active_count > max_capacity:
