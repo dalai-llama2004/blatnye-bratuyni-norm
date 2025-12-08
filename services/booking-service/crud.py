@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, date
 from typing import List, Optional
 
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -617,8 +617,6 @@ async def get_zones_statistics(
     
     Использует единый запрос с условной агрегацией для избежания N+1 проблемы.
     """
-    from sqlalchemy import func, case
-    
     # Единый запрос с условной агрегацией для подсчета активных и отмененных броней
     stmt = (
         select(
@@ -664,8 +662,6 @@ async def get_global_statistics(
     - общее число отмененных бронирований (status=cancelled)
     - число пользователей "прямо сейчас" в коворкинге
     """
-    from sqlalchemy import func
-    
     # Подсчет активных и отмененных бронирований
     stmt = select(
         func.count(models.Booking.id).filter(models.Booking.status == "active").label("active_count"),
